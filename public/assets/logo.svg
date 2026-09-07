@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 200" role="img" aria-label="Goe Nieuws">
+  <text x="20" y="78" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="64" font-weight="900" letter-spacing="-2">GOE NIEUWS</text>
+  <text x="20" y="148" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="64" font-weight="900" letter-spacing="-2">GOE NIEUWS</text>
+  <path d="M30 55 C80 20, 140 90, 200 40 C260 10, 300 95, 360 45 C420 15, 480 90, 540 50 C580 30, 610 70, 620 55" fill="none" stroke="#000" stroke-width="7" stroke-linecap="round"/>
+  <path d="M25 70 C90 110, 150 30, 220 85 C280 120, 340 35, 410 90 C470 125, 530 40, 600 80" fill="none" stroke="#000" stroke-width="6" stroke-linecap="round"/>
+  <path d="M40 125 C100 95, 160 160, 230 115 C300 85, 360 165, 430 120 C490 95, 550 155, 610 130" fill="none" stroke="#000" stroke-width="7" stroke-linecap="round"/>
+  <path d="M35 145 C110 175, 170 110, 250 155 C320 185, 380 115, 460 160 C520 185, 570 125, 625 150" fill="none" stroke="#000" stroke-width="6" stroke-linecap="round"/>
+</svg>
