@@ -21,8 +21,11 @@ export function NewsletterBuilder() {
   const [copied, setCopied] = useState(false);
 
   const html = useMemo(() => {
-    const absoluteBaseUrl =
-      typeof window !== "undefined" ? window.location.origin : undefined;
+    if (typeof window === "undefined") {
+      return buildNewsletterHtml(draft);
+    }
+    const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+    const absoluteBaseUrl = `${window.location.origin}${basePath}`;
     return buildNewsletterHtml(draft, { absoluteBaseUrl });
   }, [draft]);
 

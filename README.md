@@ -1,44 +1,45 @@
 # Goe Nieuws · Newsletter builder
 
-Petite interface pour préparer la newsletter mensuelle informative de **Goe Nieuws**, avec preview HTML email-safe. L’envoi Brevo se branche ensuite.
+Interface to prepare the monthly Goe Nieuws newsletter, with live email-safe HTML preview. Brevo sending comes later.
 
 ## Stack
 
-- Next.js (App Router)
-- Template HTML table-based (Outlook-friendly)
-- Times New Roman + fallbacks serif
-- Stub Brevo dans `src/lib/brevo.ts`
+- Next.js (App Router, static export)
+- Table-based HTML email (Outlook-friendly)
+- Times New Roman + serif fallbacks
+- Brevo stub in `src/lib/brevo.ts`
 
-## Démarrer
+## Local
 
 ```bash
 npm install
 npm run dev
 ```
 
-Ouvre [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000).
 
-## Structure newsletter
+## GitHub Pages
+
+Public URL (after first deploy):
+
+**https://remyd1999-tech.github.io/goe-nieuws-newsletter/**
+
+1. Repo → **Settings → Pages**
+2. Source: **GitHub Actions**
+3. Push to `main` (or run the **Deploy GitHub Pages** workflow)
+
+Build uses `GITHUB_PAGES=true` → `basePath` `/goe-nieuws-newsletter`.
+
+## Newsletter structure
 
 1. Logo  
-2. Tagline (NL + EN)  
+2. Tagline  
 3. Cover  
-4. Label (ex. `CHAPTER TWO`)  
-5. Titre  
-6. Corps (paragraphes + images intercalées)  
-7. Socials + note + unsubscribe Brevo `{{ unsubscribe }}`
+4. Label (e.g. `CHAPTER TWO`)  
+5. Title  
+6. Body (paragraphs + images)  
+7. Socials + note + Brevo `{{ unsubscribe }}`
 
-## Assets
+## Brevo (later)
 
-- `public/assets/cover.jpg` — cover OK  
-- `public/assets/image-2.png` — illustration OK  
-- `public/assets/logo.svg` / `scribbles.svg` — recréés (les exports Figma logo/tagline/image-1 étaient quasi noirs, souvent un fond transparent exporté en JPEG)
-
-Re-exporte depuis Figma en **PNG fond blanc** si tu veux les originaux.
-
-## Brevo (plus tard)
-
-1. Créer une clé API Brevo  
-2. Ajouter `BREVO_API_KEY` dans `.env.local`  
-3. Brancher `src/lib/brevo.ts` + une route `/api/send`  
-4. Héberger les images en URL absolue (Brevo ne voit pas `localhost`)
+Needs a server (not GitHub Pages). Use Vercel/Netlify or a small API for sending.
