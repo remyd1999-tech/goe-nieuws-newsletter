@@ -133,7 +133,7 @@ export function NewsletterBuilder() {
   return (
     <div className="min-h-screen bg-[#ececec] text-black">
       <header className="border-b border-black/15 bg-white">
-        <div className="mx-auto flex max-w-[1400px] flex-wrap items-end justify-between gap-4 px-5 py-5">
+        <div className="mx-auto flex w-full max-w-[1800px] flex-wrap items-end justify-between gap-4 px-5 py-5">
           <div>
             <p className="text-xs uppercase tracking-[0.18em] text-black/60">
               Goe Nieuws
@@ -165,7 +165,7 @@ export function NewsletterBuilder() {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-[1400px] gap-6 px-5 py-6 lg:grid-cols-[minmax(320px,440px)_1fr]">
+      <main className="mx-auto grid w-full max-w-[1800px] gap-6 overflow-x-auto px-5 py-6 lg:grid-cols-[360px_minmax(680px,1fr)]">
         <section className="space-y-5 self-start border border-black/15 bg-white p-5">
           <Field
             label="Label"
@@ -377,14 +377,14 @@ export function NewsletterBuilder() {
           </div>
         </section>
 
-        <section className="min-h-[80vh] overflow-hidden border border-black/15 bg-[#d8d8d8]">
+        <section className="min-h-[80vh] min-w-[680px] overflow-auto border border-black/15 bg-[#d8d8d8]">
           <div className="border-b border-black/10 bg-white px-4 py-2 text-xs uppercase tracking-[0.14em] text-black/60">
-            Email preview
+            Email preview · real size (600px)
           </div>
           <iframe
             title="Newsletter preview"
             srcDoc={html}
-            className="h-[calc(100%-2rem)] min-h-[80vh] w-full bg-[#f3f3f3]"
+            className="h-[calc(100%-2rem)] min-h-[80vh] w-full min-w-[680px] bg-[#f3f3f3]"
           />
         </section>
       </main>
