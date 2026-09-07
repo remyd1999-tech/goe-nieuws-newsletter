@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   BodyBlock,
   NewsletterColors,
@@ -16,17 +16,29 @@ function newId(): string {
   return crypto.randomUUID();
 }
 
+function resolveAssetBaseUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  if (typeof window === "undefined") {
+    return configured;
+  }
+  // Fallback if env wasn't baked in: detect project Pages path
+  const detected =
+    configured ||
+    (window.location.pathname.startsWith("/goe-nieuws-newsletter")
+      ? "/goe-nieuws-newsletter"
+      : "");
+  return `${window.location.origin}${detected}`;
+}
+
 export function NewsletterBuilder() {
   const [draft, setDraft] = useState<NewsletterDraft>(sampleDraft);
   const [copied, setCopied] = useState(false);
+  const [html, setHtml] = useState(() => buildNewsletterHtml(sampleDraft));
 
-  const html = useMemo(() => {
-    if (typeof window === "undefined") {
-      return buildNewsletterHtml(draft);
-    }
-    const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-    const absoluteBaseUrl = `${window.location.origin}${basePath}`;
-    return buildNewsletterHtml(draft, { absoluteBaseUrl });
+  useEffect(() => {
+    setHtml(
+      buildNewsletterHtml(draft, { absoluteBaseUrl: resolveAssetBaseUrl() }),
+    );
   }, [draft]);
 
   function updateField<K extends keyof NewsletterDraft>(
