@@ -30,6 +30,10 @@ jobs:
       - name: Install
         run: npm ci
 
+      # API routes (Brevo) need a Node host — strip them for static Pages export
+      - name: Strip API routes for static export
+        run: rm -rf src/app/api
+
       - name: Build static export
         run: npm run build
         env:

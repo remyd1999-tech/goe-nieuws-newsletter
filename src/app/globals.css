@@ -1,15 +1,50 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ececec;
-  --foreground: #000000;
+  --background: #f5f5f7;
+  --foreground: #1d1d1f;
+  --surface: #ffffff;
+  --surface-elevated: #ffffff;
+  --fill: rgba(0, 0, 0, 0.04);
+  --fill-hover: rgba(0, 0, 0, 0.06);
+  --fill-active: rgba(0, 0, 0, 0.08);
+  --separator: rgba(0, 0, 0, 0.08);
+  --separator-strong: rgba(0, 0, 0, 0.12);
+  --text-secondary: #6e6e73;
+  --text-tertiary: #86868b;
+  --accent: #0071e3;
+  --accent-hover: #0077ed;
+  --accent-soft: rgba(0, 113, 227, 0.1);
+  --danger: #ff3b30;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: Helvetica, "Helvetica Neue", Arial, sans-serif;
-  --font-serif: "Times New Roman", Times, Georgia, serif;
+  --color-surface: var(--surface);
+  --color-fill: var(--fill);
+  --color-separator: var(--separator);
+  --color-secondary: var(--text-secondary);
+  --color-tertiary: var(--text-tertiary);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-serif: "New York", "Times New Roman", Times, Georgia, serif;
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius-lg);
+}
+
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
@@ -18,8 +53,40 @@ body {
   font-family: var(--font-sans);
 }
 
+::selection {
+  background: var(--accent-soft);
+  color: var(--foreground);
+}
+
+/* Thin, quiet scrollbars */
+.apple-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+
+.apple-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.apple-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.apple-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.apple-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.28);
+  background-clip: content-box;
+}
+
 .tiptap p.is-editor-empty:first-child::before {
-  color: rgba(0, 0, 0, 0.35);
+  color: var(--text-tertiary);
   content: attr(data-placeholder);
   float: left;
   height: 0;
@@ -32,4 +99,26 @@ body {
 
 .tiptap p {
   margin: 0;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 0.4;
+}
+
+input[type="color"] {
+  -webkit-appearance: none;
+  appearance: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 8px;
 }

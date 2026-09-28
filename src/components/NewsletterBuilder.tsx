@@ -1,16 +1,37 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   BodyBlock,
   NewsletterColors,
   NewsletterDraft,
   NewsletterTypography,
-  TextStyle,
+  Section,
+  SectionFont,
+  SpacingTokens,
+} from "@/lib/types";
+import {
+  defaultSpacing,
+  EMAIL_MOBILE_BREAKPOINT,
+  resolveMobileSpacing,
+  resolveMobileTypography,
 } from "@/lib/types";
 import { buildNewsletterHtml } from "@/lib/email-template";
+import {
+  clearDraft,
+  downloadDraftJson,
+  loadDraft,
+  parseDraftJson,
+  saveDraft,
+} from "@/lib/draft-storage";
 import { sampleDraft } from "@/lib/sample-draft";
 import { ParagraphEditor } from "@/components/ParagraphEditor";
+
+type PreviewMode = "desktop" | "mobile";
+
+const MOBILE_PREVIEW_WIDTH = 390;
+/** Wait after last edit before writing localStorage — avoids thrashing while typing. */
+const AUTOSAVE_MS = 700;
 
 function newId(): string {
   return crypto.randomUUID();
@@ -18,10 +39,7 @@ function newId(): string {
 
 function resolveAssetBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_BASE_PATH || "";
-  if (typeof window === "undefined") {
-    return configured;
-  }
-  // Fallback if env wasn't baked in: detect project Pages path
+  if (typeof window === "undefined") return configured;
   const detected =
     configured ||
     (window.location.pathname.startsWith("/goe-nieuws-newsletter")
@@ -32,20 +50,264 @@ function resolveAssetBaseUrl(): string {
 
 export function NewsletterBuilder() {
   const [draft, setDraft] = useState<NewsletterDraft>(sampleDraft);
+  const [ready, setReady] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [statusOk, setStatusOk] = useState<string | null>(null);
   const [html, setHtml] = useState(() => buildNewsletterHtml(sampleDraft));
+  const [sendEmails, setSendEmails] = useState("");
+  const [sendListId, setSendListId] = useState("");
+  const [brevoStatus, setBrevoStatus] = useState<string | null>(null);
+  const [brevoConfigured, setBrevoConfigured] = useState<boolean | null>(null);
+  const [sending, setSending] = useState(false);
+  const [materializing, setMaterializing] = useState(false);
+  const [previewMode, setPreviewMode] = useState<PreviewMode>("desktop");
+  const [previewHtml, setPreviewHtml] = useState(() =>
+    buildNewsletterHtml(sampleDraft, { interactive: true }),
+  );
+  const [selectedEditorId, setSelectedEditorId] = useState<string | null>(
+    null,
+  );
+  const draftRef = useRef(draft);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const selectClearTimerRef = useRef<number | null>(null);
+  draftRef.current = draft;
 
   useEffect(() => {
-    setHtml(
-      buildNewsletterHtml(draft, { absoluteBaseUrl: resolveAssetBaseUrl() }),
+    const savedDraft = loadDraft();
+    if (savedDraft) setDraft(savedDraft);
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+
+    const timer = window.setTimeout(() => {
+      const result = saveDraft(draft);
+      if (!result.ok) {
+        setSaveError(result.error);
+        return;
+      }
+      setSaveError(null);
+    }, AUTOSAVE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [draft, ready]);
+
+  useEffect(() => {
+    function flush() {
+      if (!ready) return;
+      saveDraft(draftRef.current);
+    }
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, [ready]);
+
+  useEffect(() => {
+    const assetBase =
+      process.env.NEXT_PUBLIC_ASSET_BASE_URL?.replace(/\/$/, "") ||
+      resolveAssetBaseUrl();
+    setHtml(buildNewsletterHtml(draft, { absoluteBaseUrl: assetBase }));
+    setPreviewHtml(
+      buildNewsletterHtml(draft, {
+        absoluteBaseUrl: assetBase,
+        interactive: true,
+      }),
     );
   }, [draft]);
 
-  function updateField<K extends keyof NewsletterDraft>(
-    key: K,
-    value: NewsletterDraft[K],
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      const data = event.data;
+      if (!data || data.source !== "gn-preview" || data.type !== "select") {
+        return;
+      }
+      const editorId =
+        typeof data.blockId === "string"
+          ? `editor-block-${data.blockId}`
+          : data.target === "footer"
+            ? "editor-footer"
+            : null;
+      if (!editorId) return;
+      setSelectedEditorId(editorId);
+      if (selectClearTimerRef.current != null) {
+        window.clearTimeout(selectClearTimerRef.current);
+      }
+      // Hold highlight ~500ms, then CSS transition fades the outline out.
+      selectClearTimerRef.current = window.setTimeout(() => {
+        setSelectedEditorId(null);
+        selectClearTimerRef.current = null;
+      }, 500);
+      requestAnimationFrame(() => {
+        const el = document.getElementById(editorId);
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    }
+    window.addEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      if (selectClearTimerRef.current != null) {
+        window.clearTimeout(selectClearTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
+    fetch(`${base}/api/send`)
+      .then((r) => r.json())
+      .then((d: { configured?: boolean; defaultListId?: number | null }) => {
+        setBrevoConfigured(Boolean(d.configured));
+        if (d.defaultListId) setSendListId(String(d.defaultListId));
+      })
+      .catch(() => setBrevoConfigured(false));
+  }, []);
+
+  function updateSection(id: string, patch: Partial<Section>) {
+    setDraft((prev) => ({
+      ...prev,
+      sections: prev.sections.map((s) =>
+        s.id === id ? { ...s, ...patch } : s,
+      ),
+    }));
+  }
+
+  function updateBlock(
+    sectionId: string,
+    blockId: string,
+    patch: Partial<BodyBlock>,
   ) {
-    setDraft((prev) => ({ ...prev, [key]: value }));
+    setDraft((prev) => ({
+      ...prev,
+      sections: prev.sections.map((s) => {
+        if (s.id !== sectionId) return s;
+        return {
+          ...s,
+          blocks: s.blocks.map((b) =>
+            b.id === blockId ? ({ ...b, ...patch } as BodyBlock) : b,
+          ),
+        };
+      }),
+    }));
+  }
+
+  function addSection() {
+    setDraft((prev) => ({
+      ...prev,
+      sections: [
+        ...prev.sections,
+        {
+          id: newId(),
+          font: "sans",
+          blocks: [
+            {
+              id: newId(),
+              type: "text",
+              html: "<p></p>",
+              align: "left",
+            },
+          ],
+        },
+      ],
+    }));
+  }
+
+  function removeSection(id: string) {
+    setDraft((prev) => ({
+      ...prev,
+      sections: prev.sections.filter((s) => s.id !== id),
+    }));
+  }
+
+  function moveSection(id: string, direction: -1 | 1) {
+    setDraft((prev) => {
+      const index = prev.sections.findIndex((s) => s.id === id);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= prev.sections.length) return prev;
+      const sections = [...prev.sections];
+      const [item] = sections.splice(index, 1);
+      sections.splice(target, 0, item);
+      return { ...prev, sections };
+    });
+  }
+
+  function addBlock(sectionId: string, type: BodyBlock["type"]) {
+    const block: BodyBlock =
+      type === "image"
+        ? {
+            id: newId(),
+            type: "image",
+            src: "",
+            alt: "",
+            spacing: {
+              top: draft.spacing.image,
+              bottom: draft.spacing.image,
+            },
+          }
+        : type === "meta"
+          ? {
+              id: newId(),
+              type: "meta",
+              left: "SEIZOEN 01 — AANRAKING",
+              right: "NIEUWSBRIEF 01",
+            }
+          : type === "framedTitle"
+            ? {
+                id: newId(),
+                type: "framedTitle",
+                html: "<p>Title</p>",
+                width: 2,
+              }
+            : type === "divider"
+              ? {
+                  id: newId(),
+                  type: "divider",
+                  spacing: {
+                    top: draft.spacing.divider,
+                    bottom: draft.spacing.divider,
+                  },
+                }
+              : {
+                  id: newId(),
+                  type: "text",
+                  html: "<p></p>",
+                  align: "left",
+                };
+
+    setDraft((prev) => ({
+      ...prev,
+      sections: prev.sections.map((s) =>
+        s.id === sectionId ? { ...s, blocks: [...s.blocks, block] } : s,
+      ),
+    }));
+  }
+
+  function removeBlock(sectionId: string, blockId: string) {
+    setDraft((prev) => ({
+      ...prev,
+      sections: prev.sections.map((s) =>
+        s.id === sectionId
+          ? { ...s, blocks: s.blocks.filter((b) => b.id !== blockId) }
+          : s,
+      ),
+    }));
+  }
+
+  function moveBlock(sectionId: string, blockId: string, direction: -1 | 1) {
+    setDraft((prev) => ({
+      ...prev,
+      sections: prev.sections.map((s) => {
+        if (s.id !== sectionId) return s;
+        const index = s.blocks.findIndex((b) => b.id === blockId);
+        const target = index + direction;
+        if (index < 0 || target < 0 || target >= s.blocks.length) return s;
+        const blocks = [...s.blocks];
+        const [item] = blocks.splice(index, 1);
+        blocks.splice(target, 0, item);
+        return { ...s, blocks };
+      }),
+    }));
   }
 
   function updateColor<K extends keyof NewsletterColors>(
@@ -58,70 +320,54 @@ export function NewsletterBuilder() {
     }));
   }
 
-  function updateTypography(
-    key: keyof NewsletterTypography,
-    patch: Partial<TextStyle>,
-  ) {
-    setDraft((prev) => ({
-      ...prev,
-      typography: {
-        ...prev.typography,
-        [key]: { ...prev.typography[key], ...patch },
-      },
-    }));
-  }
-
-  function updateBlock(id: string, patch: Partial<BodyBlock>) {
-    setDraft((prev) => ({
-      ...prev,
-      blocks: prev.blocks.map((block) =>
-        block.id === id ? ({ ...block, ...patch } as BodyBlock) : block,
-      ),
-    }));
-  }
-
-  function addParagraph() {
-    setDraft((prev) => ({
-      ...prev,
-      blocks: [
-        ...prev.blocks,
-        { id: newId(), type: "paragraph", html: "<p></p>" },
-      ],
-    }));
-  }
-
-  function addImage() {
-    setDraft((prev) => ({
-      ...prev,
-      blocks: [
-        ...prev.blocks,
-        {
-          id: newId(),
-          type: "image",
-          src: "/assets/image-1.jpg",
-          alt: "Illustration",
-        },
-      ],
-    }));
-  }
-
-  function removeBlock(id: string) {
-    setDraft((prev) => ({
-      ...prev,
-      blocks: prev.blocks.filter((b) => b.id !== id),
-    }));
-  }
-
-  function moveBlock(id: string, direction: -1 | 1) {
+  function updateSpacing(patch: Partial<SpacingTokens>) {
     setDraft((prev) => {
-      const index = prev.blocks.findIndex((b) => b.id === id);
-      const target = index + direction;
-      if (index < 0 || target < 0 || target >= prev.blocks.length) return prev;
-      const blocks = [...prev.blocks];
-      const [item] = blocks.splice(index, 1);
-      blocks.splice(target, 0, item);
-      return { ...prev, blocks };
+      if (previewMode === "mobile") {
+        return {
+          ...prev,
+          mobileSpacing: { ...prev.mobileSpacing, ...patch },
+        };
+      }
+      return {
+        ...prev,
+        spacing: { ...prev.spacing, ...patch },
+      };
     });
+  }
+
+  function updateTypography(patch: Partial<NewsletterTypography>) {
+    setDraft((prev) => {
+      if (previewMode === "mobile") {
+        return {
+          ...prev,
+          mobileTypography: { ...prev.mobileTypography, ...patch },
+        };
+      }
+      return {
+        ...prev,
+        typography: { ...prev.typography, ...patch },
+      };
+    });
+  }
+
+  function resetSpacing() {
+    if (previewMode === "mobile") {
+      setDraft((prev) => ({
+        ...prev,
+        mobileSpacing: undefined,
+      }));
+      return;
+    }
+    updateSpacing(defaultSpacing);
+  }
+
+  function resetTypography() {
+    if (previewMode === "mobile") {
+      setDraft((prev) => ({
+        ...prev,
+        mobileTypography: undefined,
+      }));
+    }
   }
 
   async function copyHtml() {
@@ -130,264 +376,1139 @@ export function NewsletterBuilder() {
     window.setTimeout(() => setCopied(false), 1800);
   }
 
+  function persistDraft(next: NewsletterDraft, flash = false) {
+    const result = saveDraft(next);
+    if (!result.ok) {
+      setSaveError(result.error);
+      setSaved(false);
+      window.setTimeout(() => setSaveError(null), 4000);
+      return false;
+    }
+    setSaveError(null);
+    if (flash) {
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1800);
+    }
+    return true;
+  }
+
+  function handleSave() {
+    persistDraft(draft, true);
+  }
+
+  function handleExport() {
+    downloadDraftJson(draft);
+  }
+
+  function countDataUrlImages(d: NewsletterDraft): number {
+    let n = 0;
+    if (d.dividerSrc?.startsWith("data:")) n += 1;
+    if (d.footer.logoSrc?.startsWith("data:")) n += 1;
+    for (const section of d.sections) {
+      for (const block of section.blocks) {
+        if (block.type === "image" && block.src.startsWith("data:")) n += 1;
+      }
+    }
+    return n;
+  }
+
+  async function handleMaterializeImages() {
+    setMaterializing(true);
+    setSaveError(null);
+    try {
+      const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
+      const res = await fetch(`${base}/api/materialize-images`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ draft }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        message?: string;
+        files?: string[];
+        draft?: NewsletterDraft;
+      };
+      if (!res.ok || !data.ok || !data.draft) {
+        setSaveError(data.message || "Could not save images to disk.");
+        window.setTimeout(() => setSaveError(null), 5000);
+        return;
+      }
+      setDraft(data.draft);
+      persistDraft(data.draft, true);
+      const msg = data.files?.length
+        ? `Saved ${data.files.length} image(s) to public/assets/`
+        : data.message || "No data-URL images found.";
+      setStatusOk(msg);
+      setBrevoStatus(msg);
+      window.setTimeout(() => {
+        setStatusOk(null);
+        setBrevoStatus(null);
+      }, 6000);
+    } catch {
+      setSaveError("Could not reach /api/materialize-images.");
+      window.setTimeout(() => setSaveError(null), 5000);
+    } finally {
+      setMaterializing(false);
+    }
+  }
+
+  function handleImportClick() {
+    importInputRef.current?.click();
+  }
+
+  async function handleImportFile(file: File | undefined) {
+    if (!file) return;
+    try {
+      const raw = await file.text();
+      const imported = parseDraftJson(raw);
+      if (!imported) {
+        setSaveError("Invalid draft JSON.");
+        window.setTimeout(() => setSaveError(null), 4000);
+        return;
+      }
+      setDraft(imported);
+      persistDraft(imported, true);
+    } catch {
+      setSaveError("Could not read that file.");
+      window.setTimeout(() => setSaveError(null), 4000);
+    }
+  }
+
+  function handleReset() {
+    clearDraft();
+    setDraft(sampleDraft);
+    setSaved(false);
+    setSaveError(null);
+  }
+
+  async function sendBrevo(mode: "test" | "list") {
+    setSending(true);
+    setBrevoStatus(null);
+    try {
+      const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
+      const payload: Record<string, unknown> = {
+        subject: draft.subject,
+        htmlContent: html,
+      };
+      if (mode === "test") {
+        payload.emails = sendEmails;
+      } else {
+        const id = Number(sendListId);
+        if (!Number.isFinite(id)) {
+          setBrevoStatus("Invalid list id.");
+          return;
+        }
+        payload.listIds = [id];
+      }
+      const res = await fetch(`${base}/api/send`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await res.json()) as { ok?: boolean; message?: string };
+      setBrevoStatus(data.message || (data.ok ? "Sent." : "Send failed."));
+    } catch {
+      setBrevoStatus(
+        "Send failed — API unavailable (GitHub Pages is static). Use local or Vercel.",
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const displaySpacing =
+    previewMode === "mobile" ? resolveMobileSpacing(draft) : draft.spacing;
+  const displayTypography =
+    previewMode === "mobile"
+      ? resolveMobileTypography(draft)
+      : draft.typography;
+
+  // Desktop iframe must be wider than the email @media breakpoint so mobile
+  // CSS does not apply; mobile iframe is phone-width so it does.
+  const previewWidth =
+    previewMode === "mobile"
+      ? MOBILE_PREVIEW_WIDTH
+      : Math.max(
+          draft.spacing.emailWidth + 64,
+          EMAIL_MOBILE_BREAKPOINT + 40,
+        );
+
+  function syncPreviewHeight(frame: HTMLIFrameElement | null) {
+    if (!frame) return;
+    const doc = frame.contentDocument;
+    if (!doc?.body) return;
+    const height = Math.max(
+      doc.body.scrollHeight,
+      doc.documentElement.scrollHeight,
+    );
+    frame.style.height = `${height}px`;
+  }
+
   return (
-    <div className="min-h-screen bg-[#ececec] text-black">
-      <header className="border-b border-black/15 bg-white">
-        <div className="mx-auto flex w-full max-w-[1800px] flex-wrap items-end justify-between gap-4 px-5 py-5">
-          <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-black/60">
+    <div className="flex h-dvh flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
+      <header className="shrink-0 border-b border-[var(--separator)] bg-white/72 backdrop-blur-xl backdrop-saturate-150">
+        <div className="mx-auto flex w-full max-w-[1680px] items-center justify-between gap-6 px-6 py-3.5">
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium tracking-[0.02em] text-[var(--text-tertiary)]">
               Goe Nieuws
             </p>
-            <h1 className="text-2xl font-bold tracking-tight">
-              Newsletter builder
+            <h1 className="truncate text-[17px] font-semibold tracking-[-0.02em]">
+              Newsletter
             </h1>
-            <p className="mt-1 max-w-xl text-sm text-black/70">
-              Edit this month’s issue · live preview · email-ready HTML. Brevo
-              comes next.
-            </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex shrink-0 items-center gap-2">
+            {saveError ? (
+              <p className="max-w-[220px] truncate text-[12px] text-red-600">
+                {saveError}
+              </p>
+            ) : statusOk ? (
+              <p className="max-w-[280px] truncate text-[12px] text-emerald-700">
+                {statusOk}
+              </p>
+            ) : null}
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                void handleImportFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
             <button
               type="button"
-              onClick={() => setDraft(sampleDraft)}
-              className="border border-black bg-white px-3 py-2 text-sm hover:bg-black hover:text-white"
+              onClick={handleReset}
+              className="rounded-[var(--radius-sm)] bg-[var(--fill)] px-3.5 py-1.5 text-[13px] font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--fill-hover)] active:bg-[var(--fill-active)]"
             >
-              Reset sample
+              Reset
+            </button>
+            <button
+              type="button"
+              onClick={handleImportClick}
+              className="rounded-[var(--radius-sm)] bg-[var(--fill)] px-3.5 py-1.5 text-[13px] font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--fill-hover)] active:bg-[var(--fill-active)]"
+            >
+              Import
+            </button>
+            <button
+              type="button"
+              onClick={handleExport}
+              className="rounded-[var(--radius-sm)] bg-[var(--fill)] px-3.5 py-1.5 text-[13px] font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--fill-hover)] active:bg-[var(--fill-active)]"
+            >
+              Export
+            </button>
+            {countDataUrlImages(draft) > 0 ? (
+              <button
+                type="button"
+                disabled={materializing}
+                onClick={() => void handleMaterializeImages()}
+                className="rounded-[var(--radius-sm)] bg-[var(--fill)] px-3.5 py-1.5 text-[13px] font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--fill-hover)] active:bg-[var(--fill-active)] disabled:opacity-50"
+              >
+                {materializing
+                  ? "Saving images…"
+                  : `Save ${countDataUrlImages(draft)} image(s) to disk`}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={handleSave}
+              className="rounded-[var(--radius-sm)] bg-[var(--fill)] px-3.5 py-1.5 text-[13px] font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--fill-hover)] active:bg-[var(--fill-active)]"
+            >
+              {saved ? "Saved" : "Save"}
             </button>
             <button
               type="button"
               onClick={copyHtml}
-              className="border border-black bg-black px-3 py-2 text-sm text-white hover:bg-white hover:text-black"
+              className="rounded-[var(--radius-sm)] bg-[var(--accent)] px-3.5 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-[var(--accent-hover)] active:scale-[0.98]"
             >
-              {copied ? "HTML copied" : "Copy HTML"}
+              {copied ? "Copied" : "Copy HTML"}
             </button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto grid w-full max-w-[1800px] gap-6 overflow-x-auto px-5 py-6 lg:grid-cols-[360px_minmax(680px,1fr)]">
-        <section className="space-y-5 self-start border border-black/15 bg-white p-5">
-          <Field
-            label="Label"
-            value={draft.label}
-            onChange={(v) => updateField("label", v)}
-          />
-          <label className="block">
-            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-black/55">
-              Title
-            </span>
-            <ParagraphEditor
-              value={draft.title}
-              onChange={(html) => updateField("title", html)}
-              placeholder="Write the title… select words to format"
-              compact
+      <main className="mx-auto grid min-h-0 w-full max-w-[1680px] flex-1 gap-5 px-5 py-5 lg:grid-cols-[400px_minmax(0,1fr)]">
+        <aside className="apple-scroll min-h-0 space-y-3 overflow-y-auto pr-1">
+          <div className="rounded-[var(--radius)] bg-[var(--surface)] p-4 shadow-[var(--shadow-sm)]">
+            <Field
+              label="Subject"
+              value={draft.subject}
+              onChange={(v) => setDraft((p) => ({ ...p, subject: v }))}
             />
-          </label>
-          <Field
-            label="Cover image URL"
-            value={draft.coverSrc}
-            onChange={(v) => updateField("coverSrc", v)}
-          />
-          <Field
-            label="Logo URL"
-            value={draft.logoSrc}
-            onChange={(v) => updateField("logoSrc", v)}
-          />
-          <Field
-            label="Tagline image URL"
-            value={draft.taglineSrc}
-            onChange={(v) => updateField("taglineSrc", v)}
-          />
-
-          <div className="border-t border-black/10 pt-4">
-            <h2 className="mb-3 text-lg font-bold">Colors</h2>
-            <div className="grid grid-cols-2 gap-3">
-              <ColorField
-                label="Background 1 (card)"
-                value={draft.colors.backgroundCard}
-                onChange={(v) => updateColor("backgroundCard", v)}
-              />
-              <ColorField
-                label="Background 2 (outer)"
-                value={draft.colors.backgroundOuter}
-                onChange={(v) => updateColor("backgroundOuter", v)}
-              />
-              <ColorField
-                label="Logo"
-                value={draft.colors.logo}
-                onChange={(v) => updateColor("logo", v)}
-              />
-              <ColorField
-                label="Tagline"
-                value={draft.colors.tagline}
-                onChange={(v) => updateColor("tagline", v)}
-              />
-              <ColorField
-                label="Label"
-                value={draft.colors.label}
-                onChange={(v) => updateColor("label", v)}
-              />
-              <ColorField
-                label="Title"
-                value={draft.colors.title}
-                onChange={(v) => updateColor("title", v)}
-              />
-              <ColorField
-                label="Body"
-                value={draft.colors.body}
-                onChange={(v) => updateColor("body", v)}
-              />
-              <ColorField
-                label="Footer / links"
-                value={draft.colors.footer}
-                onChange={(v) => updateColor("footer", v)}
-              />
-              <ColorField
-                label="Footer rule"
-                value={draft.colors.footerRule}
-                onChange={(v) => updateColor("footerRule", v)}
-              />
-            </div>
-            <p className="mt-2 text-xs text-black/55">
-              Logo / tagline tint uses CSS mask in preview. Some email clients
-              may need a pre-colored asset when sending.
-            </p>
           </div>
 
-          <div className="border-t border-black/10 pt-4">
-            <h2 className="mb-3 text-lg font-bold">Type size & leading</h2>
-            <div className="space-y-3">
-              <TypeStyleField
-                label="Label"
-                value={draft.typography.label}
-                onChange={(patch) => updateTypography("label", patch)}
-              />
-              <TypeStyleField
-                label="Title"
-                value={draft.typography.title}
-                onChange={(patch) => updateTypography("title", patch)}
-              />
-              <TypeStyleField
-                label="Body"
-                value={draft.typography.body}
-                onChange={(patch) => updateTypography("body", patch)}
-              />
-              <TypeStyleField
-                label="Footer"
-                value={draft.typography.footer}
-                onChange={(patch) => updateTypography("footer", patch)}
-              />
-            </div>
+          <div className="flex items-center justify-between gap-2 px-1 pt-1">
+            <h2 className="text-[15px] font-semibold tracking-[-0.02em]">
+              Sections
+            </h2>
+            <button
+              type="button"
+              onClick={addSection}
+              className="rounded-md px-2 py-1 text-[12px] font-medium text-[var(--accent)] transition-opacity hover:opacity-70"
+            >
+              Add
+            </button>
           </div>
 
-          <div className="border-t border-black/10 pt-4">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 className="text-lg font-bold">Body</h2>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={addParagraph}
-                  className="border border-black px-2 py-1 text-xs hover:bg-black hover:text-white"
-                >
-                  + Paragraph
-                </button>
-                <button
-                  type="button"
-                  onClick={addImage}
-                  className="border border-black px-2 py-1 text-xs hover:bg-black hover:text-white"
-                >
-                  + Image
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {draft.blocks.map((block, index) => (
+          <div className="space-y-3">
+              {draft.sections.map((section, sIndex) => (
                 <div
-                  key={block.id}
-                  className="border border-black/15 bg-[#fafafa] p-3"
+                  key={section.id}
+                  className="overflow-hidden rounded-[var(--radius)] bg-[#e8e8ed] shadow-[var(--shadow-sm)]"
                 >
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="text-xs uppercase tracking-wide text-black/55">
-                      {block.type} · {index + 1}
+                  <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+                    <span className="text-[12px] font-semibold tracking-[-0.01em] text-[var(--text-secondary)]">
+                      Section {sIndex + 1}
                     </span>
-                    <div className="flex gap-1">
-                      <button
-                        type="button"
-                        onClick={() => moveBlock(block.id, -1)}
-                        className="border border-black/30 px-1.5 py-0.5 text-xs"
-                        aria-label="Move up"
+                    <div className="flex items-center gap-1">
+                      <FontToggle
+                        value={section.font}
+                        onChange={(font) =>
+                          updateSection(section.id, { font })
+                        }
+                      />
+                      <IconButton
+                        onClick={() => moveSection(section.id, -1)}
+                        title="Move up"
                       >
                         ↑
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveBlock(block.id, 1)}
-                        className="border border-black/30 px-1.5 py-0.5 text-xs"
-                        aria-label="Move down"
+                      </IconButton>
+                      <IconButton
+                        onClick={() => moveSection(section.id, 1)}
+                        title="Move down"
                       >
                         ↓
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeBlock(block.id)}
-                        className="border border-black/30 px-1.5 py-0.5 text-xs"
-                        aria-label="Remove"
+                      </IconButton>
+                      <IconButton
+                        onClick={() => removeSection(section.id)}
+                        title="Remove"
+                        danger
                       >
                         ×
-                      </button>
+                      </IconButton>
                     </div>
                   </div>
 
-                  {block.type === "paragraph" ? (
-                    <ParagraphEditor
-                      value={block.html}
-                      onChange={(html) => updateBlock(block.id, { html })}
-                    />
-                  ) : (
-                    <div className="space-y-2">
-                      <Field
-                        label="Image URL"
-                        value={block.src}
-                        onChange={(v) => updateBlock(block.id, { src: v })}
-                      />
-                      <Field
-                        label="Alt text"
-                        value={block.alt}
-                        onChange={(v) => updateBlock(block.id, { alt: v })}
-                      />
-                    </div>
-                  )}
+                  <div className="space-y-2 px-2.5 pb-2.5">
+                    {section.blocks.map((block, bIndex) => (
+                      <div
+                        key={block.id}
+                        id={`editor-block-${block.id}`}
+                        className={`rounded-[10px] bg-white p-3 shadow-[var(--shadow-sm)] outline outline-2 outline-offset-[-1px] transition-[outline-color] duration-300 ${
+                          selectedEditorId === `editor-block-${block.id}`
+                            ? "outline-[var(--accent)]"
+                            : "outline-transparent"
+                        }`}
+                      >
+                        <div className="mb-2.5 flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-medium capitalize text-[var(--text-tertiary)]">
+                            {block.type === "divider"
+                              ? "Dots"
+                              : block.type === "framedTitle"
+                                ? "Framed"
+                                : block.type}
+                            <span className="text-[var(--separator-strong)]">
+                              {" "}
+                              · {bIndex + 1}
+                            </span>
+                          </span>
+                          <div className="flex gap-0.5">
+                            <IconButton
+                              onClick={() =>
+                                moveBlock(section.id, block.id, -1)
+                              }
+                              title="Move up"
+                            >
+                              ↑
+                            </IconButton>
+                            <IconButton
+                              onClick={() =>
+                                moveBlock(section.id, block.id, 1)
+                              }
+                              title="Move down"
+                            >
+                              ↓
+                            </IconButton>
+                            <IconButton
+                              onClick={() =>
+                                removeBlock(section.id, block.id)
+                              }
+                              title="Remove"
+                              danger
+                            >
+                              ×
+                            </IconButton>
+                          </div>
+                        </div>
+
+                        {block.type === "text" && (
+                          <div className="space-y-2.5">
+                            <AlignToggle
+                              value={block.align ?? "left"}
+                              onChange={(align) =>
+                                updateBlock(section.id, block.id, { align })
+                              }
+                            />
+                            <ParagraphEditor
+                              value={block.html}
+                              onChange={(htmlValue) =>
+                                updateBlock(section.id, block.id, {
+                                  html: htmlValue,
+                                })
+                              }
+                            />
+                            <SpacingFields
+                              top={block.spacing?.top ?? 0}
+                              bottom={
+                                block.spacing?.bottom ?? draft.spacing.text
+                              }
+                              onChange={(spacing) =>
+                                updateBlock(section.id, block.id, { spacing })
+                              }
+                            />
+                          </div>
+                        )}
+
+                        {block.type === "image" && (
+                          <div className="space-y-2.5">
+                            <ImageDropzone
+                              src={block.src}
+                              onChange={(src) =>
+                                updateBlock(section.id, block.id, { src })
+                              }
+                            />
+                            <label className="flex cursor-pointer items-center justify-between gap-3 rounded-[var(--radius-sm)] bg-[var(--fill)] px-3 py-2.5">
+                              <span className="min-w-0">
+                                <span className="block text-[13px] font-medium">
+                                  Full bleed
+                                </span>
+                                <span className="block text-[11px] text-[var(--text-tertiary)]">
+                                  Edge-to-edge — ignores width and side padding
+                                </span>
+                              </span>
+                              <span className="relative inline-flex h-[22px] w-[38px] shrink-0 items-center">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(block.fullBleed)}
+                                  onChange={(e) => {
+                                    const on = e.target.checked;
+                                    updateBlock(section.id, block.id, {
+                                      fullBleed: on,
+                                      // Drop inset spacing so it can’t linger in the draft
+                                      ...(on ? { spacing: undefined } : {}),
+                                    });
+                                  }}
+                                  className="peer sr-only"
+                                />
+                                <span className="absolute inset-0 rounded-full bg-[#e9e9eb] transition-colors peer-checked:bg-[var(--accent)]" />
+                                <span className="absolute left-[2px] size-[18px] rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-[16px]" />
+                              </span>
+                            </label>
+                            <Field
+                              label="Alt text"
+                              value={block.alt}
+                              onChange={(v) =>
+                                updateBlock(section.id, block.id, { alt: v })
+                              }
+                            />
+                            <Field
+                              label="Image URL"
+                              value={block.src}
+                              onChange={(v) =>
+                                updateBlock(section.id, block.id, { src: v })
+                              }
+                            />
+                            {!block.fullBleed ? (
+                              <>
+                                <NumberField
+                                  label="Width"
+                                  value={
+                                    block.width ?? draft.spacing.imageWidth
+                                  }
+                                  onChange={(v) =>
+                                    updateBlock(section.id, block.id, {
+                                      width: v,
+                                    })
+                                  }
+                                />
+                                <p className="text-[11px] text-[var(--text-tertiary)]">
+                                  Side inset = (email width − image width) / 2
+                                </p>
+                                <SpacingFields
+                                  top={
+                                    block.spacing?.top ?? draft.spacing.image
+                                  }
+                                  bottom={
+                                    block.spacing?.bottom ??
+                                    draft.spacing.image
+                                  }
+                                  onChange={(spacing) =>
+                                    updateBlock(section.id, block.id, {
+                                      spacing,
+                                    })
+                                  }
+                                />
+                              </>
+                            ) : null}
+                          </div>
+                        )}
+
+                        {block.type === "meta" && (
+                          <div className="space-y-2.5">
+                            <Field
+                              label="Left"
+                              value={block.left}
+                              onChange={(v) =>
+                                updateBlock(section.id, block.id, { left: v })
+                              }
+                            />
+                            <Field
+                              label="Right"
+                              value={block.right}
+                              onChange={(v) =>
+                                updateBlock(section.id, block.id, {
+                                  right: v,
+                                })
+                              }
+                            />
+                            <SpacingFields
+                              top={block.spacing?.top ?? 0}
+                              bottom={
+                                block.spacing?.bottom ?? draft.spacing.text
+                              }
+                              onChange={(spacing) =>
+                                updateBlock(section.id, block.id, { spacing })
+                              }
+                            />
+                          </div>
+                        )}
+
+                        {block.type === "framedTitle" && (
+                          <div className="space-y-2.5">
+                            <ParagraphEditor
+                              value={block.html}
+                              onChange={(htmlValue) =>
+                                updateBlock(section.id, block.id, {
+                                  html: htmlValue,
+                                })
+                              }
+                              compact
+                              placeholder="Framed title…"
+                            />
+                            <div className="grid grid-cols-2 gap-2">
+                              <NumberField
+                                label="Width"
+                                value={block.width ?? 2}
+                                onChange={(v) =>
+                                  updateBlock(section.id, block.id, {
+                                    width: v,
+                                  })
+                                }
+                              />
+                              <NumberField
+                                label="Height"
+                                value={block.height ?? 0}
+                                onChange={(v) =>
+                                  updateBlock(section.id, block.id, {
+                                    height: v > 0 ? v : undefined,
+                                  })
+                                }
+                              />
+                            </div>
+                            <SpacingFields
+                              top={block.spacing?.top ?? 0}
+                              bottom={
+                                block.spacing?.bottom ?? draft.spacing.text
+                              }
+                              onChange={(spacing) =>
+                                updateBlock(section.id, block.id, { spacing })
+                              }
+                            />
+                          </div>
+                        )}
+
+                        {block.type === "divider" && (
+                          <div className="space-y-2.5">
+                            <SpacingFields
+                              top={
+                                block.spacing?.top ?? draft.spacing.divider
+                              }
+                              bottom={
+                                block.spacing?.bottom ?? draft.spacing.divider
+                              }
+                              onChange={(spacing) =>
+                                updateBlock(section.id, block.id, { spacing })
+                              }
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap gap-1 px-3 pb-3">
+                    {(
+                      [
+                        ["text", "Text"],
+                        ["image", "Image"],
+                        ["meta", "Meta"],
+                        ["framedTitle", "Framed"],
+                        ["divider", "Dots"],
+                      ] as const
+                    ).map(([type, label]) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => addBlock(section.id, type)}
+                        className="rounded-md bg-white/80 px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition-colors hover:text-[var(--foreground)]"
+                      >
+                        + {label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ))}
-            </div>
           </div>
 
-          <div className="border-t border-black/10 pt-4">
-            <h2 className="mb-2 text-lg font-bold">Footer</h2>
+          <div
+            id="editor-footer"
+            className={`rounded-[var(--radius)] outline outline-2 outline-offset-[-1px] transition-[outline-color] duration-300 ${
+              selectedEditorId === "editor-footer"
+                ? "outline-[var(--accent)]"
+                : "outline-transparent"
+            }`}
+          >
+          <Panel title="Footer">
+            <label className="mb-3 flex cursor-pointer items-center justify-between gap-3 rounded-[var(--radius-sm)] bg-[var(--fill)] px-3 py-2.5">
+              <span className="text-[13px] font-medium">Dark bar</span>
+              <span className="relative inline-flex h-[22px] w-[38px] shrink-0 items-center">
+                <input
+                  type="checkbox"
+                  checked={draft.footer.dark}
+                  onChange={(e) =>
+                    setDraft((p) => ({
+                      ...p,
+                      footer: { ...p.footer, dark: e.target.checked },
+                    }))
+                  }
+                  className="peer sr-only"
+                />
+                <span className="absolute inset-0 rounded-full bg-[#e9e9eb] transition-colors peer-checked:bg-[var(--accent)]" />
+                <span className="absolute left-[2px] size-[18px] rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-[16px]" />
+              </span>
+            </label>
+            <div className="mb-3 space-y-2">
+              <span className="block text-[11px] font-medium text-[var(--text-tertiary)]">
+                Logo
+              </span>
+              <ImageDropzone
+                src={draft.footer.logoSrc ?? ""}
+                onChange={(src) =>
+                  setDraft((p) => ({
+                    ...p,
+                    footer: {
+                      ...p.footer,
+                      logoSrc: src || undefined,
+                    },
+                  }))
+                }
+              />
+              <div className="flex flex-wrap gap-1">
+                {(
+                  [
+                    ["/assets/logo-goe.png", "Goe"],
+                    ["/assets/logo-gn.png", "GN"],
+                  ] as const
+                ).map(([src, label]) => (
+                  <button
+                    key={src}
+                    type="button"
+                    onClick={() =>
+                      setDraft((p) => ({
+                        ...p,
+                        footer: { ...p.footer, logoSrc: src },
+                      }))
+                    }
+                    className={`rounded-md px-2 py-1 text-[11px] font-medium shadow-[var(--shadow-sm)] transition-colors ${
+                      draft.footer.logoSrc === src
+                        ? "bg-[var(--accent)] text-white"
+                        : "bg-[var(--fill)] text-[var(--text-secondary)] hover:text-[var(--foreground)]"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDraft((p) => ({
+                      ...p,
+                      footer: { ...p.footer, logoSrc: undefined },
+                    }))
+                  }
+                  className="rounded-md bg-[var(--fill)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition-colors hover:text-[var(--foreground)]"
+                >
+                  None
+                </button>
+              </div>
+              <Field
+                label="Logo URL"
+                value={draft.footer.logoSrc ?? ""}
+                onChange={(v) =>
+                  setDraft((p) => ({
+                    ...p,
+                    footer: {
+                      ...p.footer,
+                      logoSrc: v.trim() || undefined,
+                    },
+                  }))
+                }
+              />
+            </div>
             <Field
               label="Footer note"
-              value={draft.footerNote}
-              onChange={(v) => updateField("footerNote", v)}
+              value={draft.footer.note}
+              onChange={(v) =>
+                setDraft((p) => ({
+                  ...p,
+                  footer: { ...p.footer, note: v },
+                }))
+              }
             />
-            <p className="mt-2 text-xs text-black/55">
-              Select a word → Bold / Italic / Underline. Unsubscribe uses{" "}
-              <code className="bg-black/5 px-1">{"{{ unsubscribe }}"}</code>.
-            </p>
+          </Panel>
           </div>
-        </section>
 
-        <section className="min-h-[80vh] min-w-[680px] overflow-auto border border-black/15 bg-[#d8d8d8]">
-          <div className="border-b border-black/10 bg-white px-4 py-2 text-xs uppercase tracking-[0.14em] text-black/60">
-            Email preview · real size (600px)
+          <Panel
+            title={previewMode === "mobile" ? "Spacing · Mobile" : "Spacing"}
+          >
+            {previewMode === "mobile" ? (
+              <p className="mb-3 text-[12px] leading-relaxed text-[var(--text-secondary)]">
+                Applied under {EMAIL_MOBILE_BREAKPOINT}px via CSS media queries.
+                Starts identical to desktop until you change a value.
+              </p>
+            ) : null}
+            <div className="grid grid-cols-2 gap-2.5">
+              <NumberField
+                label="Text gap"
+                value={displaySpacing.text}
+                onChange={(v) => updateSpacing({ text: v })}
+              />
+              <NumberField
+                label="Image gap"
+                value={displaySpacing.image}
+                onChange={(v) => updateSpacing({ image: v })}
+              />
+              <NumberField
+                label="Divider gap"
+                value={displaySpacing.divider}
+                onChange={(v) => updateSpacing({ divider: v })}
+              />
+              <NumberField
+                label="Pad X"
+                value={displaySpacing.padX}
+                onChange={(v) => updateSpacing({ padX: v })}
+              />
+              {previewMode === "desktop" ? (
+                <NumberField
+                  label="Email width"
+                  value={displaySpacing.emailWidth}
+                  onChange={(v) => updateSpacing({ emailWidth: v })}
+                />
+              ) : null}
+              <NumberField
+                label="Image width"
+                value={displaySpacing.imageWidth}
+                onChange={(v) => updateSpacing({ imageWidth: v })}
+              />
+            </div>
+            <button
+              type="button"
+              className="mt-3 text-[12px] font-medium text-[var(--accent)] transition-opacity hover:opacity-70"
+              onClick={resetSpacing}
+            >
+              {previewMode === "mobile"
+                ? "Match desktop"
+                : "Reset defaults"}
+            </button>
+          </Panel>
+
+          <Panel
+            title={
+              previewMode === "mobile" ? "Typography · Mobile" : "Typography"
+            }
+          >
+            <div className="grid grid-cols-2 gap-2.5">
+              <NumberField
+                label="Sans"
+                value={displayTypography.sansSize}
+                onChange={(v) => updateTypography({ sansSize: v })}
+              />
+              <NumberField
+                label="Serif"
+                value={displayTypography.serifSize}
+                onChange={(v) => updateTypography({ serifSize: v })}
+              />
+              <NumberField
+                label="Framed"
+                value={displayTypography.framedSize}
+                onChange={(v) => updateTypography({ framedSize: v })}
+              />
+              <NumberField
+                label="Meta"
+                value={displayTypography.metaSize}
+                onChange={(v) => updateTypography({ metaSize: v })}
+              />
+            </div>
+            {previewMode === "mobile" ? (
+              <button
+                type="button"
+                className="mt-3 text-[12px] font-medium text-[var(--accent)] transition-opacity hover:opacity-70"
+                onClick={resetTypography}
+              >
+                Match desktop
+              </button>
+            ) : null}
+          </Panel>
+
+          <Panel title="Colors">
+            <div className="grid grid-cols-2 gap-2.5">
+              {(
+                [
+                  ["sideColor", "Side"],
+                  ["backgroundCard", "Card"],
+                  ["body", "Body"],
+                  ["divider", "Dots"],
+                  ["footerBg", "Footer bg"],
+                  ["footerText", "Footer text"],
+                ] as const
+              ).map(([key, label]) => (
+                <ColorField
+                  key={key}
+                  label={label}
+                  value={draft.colors[key]}
+                  onChange={(v) => updateColor(key, v)}
+                />
+              ))}
+            </div>
+          </Panel>
+
+          <Panel title="Brevo">
+            <p className="mb-3 text-[12px] leading-relaxed text-[var(--text-secondary)]">
+              {brevoConfigured === null
+                ? "Checking connection…"
+                : brevoConfigured
+                  ? "API connected on this server."
+                  : "Not configured. Set BREVO_API_KEY + BREVO_SENDER_EMAIL on a Node host."}
+            </p>
+            <Field
+              label="Test emails"
+              value={sendEmails}
+              onChange={setSendEmails}
+              placeholder="you@example.com"
+            />
+            <button
+              type="button"
+              disabled={sending || !sendEmails.trim()}
+              onClick={() => sendBrevo("test")}
+              className="mt-2.5 w-full rounded-[var(--radius-sm)] bg-[var(--accent)] px-3 py-2 text-[13px] font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-35"
+            >
+              {sending ? "Sending…" : "Send test"}
+            </button>
+            <div className="mt-3">
+              <Field
+                label="List id"
+                value={sendListId}
+                onChange={setSendListId}
+              />
+            </div>
+            <button
+              type="button"
+              disabled={sending || !sendListId.trim()}
+              onClick={() => sendBrevo("list")}
+              className="mt-2.5 w-full rounded-[var(--radius-sm)] bg-[var(--fill)] px-3 py-2 text-[13px] font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--fill-hover)] disabled:opacity-35"
+            >
+              {sending ? "Sending…" : "Send to list"}
+            </button>
+            {brevoStatus && (
+              <p className="mt-2.5 text-[12px] leading-relaxed text-[var(--text-secondary)]">
+                {brevoStatus}
+              </p>
+            )}
+          </Panel>
+        </aside>
+
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] bg-[var(--surface)] shadow-[var(--shadow)]">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--separator)] bg-white/60 px-5 py-2.5 backdrop-blur-md">
+            <div className="flex items-center gap-3">
+              <SegmentedControl
+                options={[
+                  { value: "desktop", label: "Desktop" },
+                  { value: "mobile", label: "Mobile" },
+                ]}
+                value={previewMode}
+                onChange={setPreviewMode}
+              />
+              <span className="text-[12px] font-medium text-[var(--text-secondary)]">
+                Preview
+              </span>
+            </div>
+            <span className="rounded-md bg-[var(--fill)] px-2 py-0.5 font-mono text-[11px] tabular-nums text-[var(--text-tertiary)]">
+              {previewWidth}px
+            </span>
           </div>
-          <iframe
-            title="Newsletter preview"
-            srcDoc={html}
-            className="h-[calc(100%-2rem)] min-h-[80vh] w-full min-w-[680px] bg-[#f3f3f3]"
-          />
+          <div
+            className="apple-scroll min-h-0 flex-1 overflow-auto"
+            style={{ background: draft.colors.sideColor }}
+          >
+            <div
+              className={`mx-auto py-8 transition-[width] duration-200 ${
+                previewMode === "mobile" ? "rounded-[28px]" : ""
+              }`}
+              style={{ width: previewWidth }}
+            >
+              <iframe
+                key={previewMode}
+                title="Newsletter preview"
+                srcDoc={previewHtml}
+                width={previewWidth}
+                onLoad={(e) => syncPreviewHeight(e.currentTarget)}
+                ref={(frame) => {
+                  if (frame) syncPreviewHeight(frame);
+                }}
+                className={`block border-0 ${
+                  previewMode === "mobile"
+                    ? "overflow-hidden rounded-[24px] shadow-[var(--shadow)]"
+                    : ""
+                }`}
+                style={{
+                  width: previewWidth,
+                  height: 800,
+                  background: draft.colors.backgroundCard,
+                }}
+              />
+            </div>
+          </div>
         </section>
       </main>
+    </div>
+  );
+}
+
+function Panel({
+  title,
+  children,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  children: ReactNode;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <section className="rounded-[var(--radius)] bg-[var(--surface)] p-4 shadow-[var(--shadow-sm)]">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="text-[15px] font-semibold tracking-[-0.02em]">
+          {title}
+        </h2>
+        {actionLabel && onAction ? (
+          <button
+            type="button"
+            onClick={onAction}
+            className="rounded-md px-2 py-1 text-[12px] font-medium text-[var(--accent)] transition-opacity hover:opacity-70"
+          >
+            {actionLabel}
+          </button>
+        ) : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function IconButton({
+  children,
+  onClick,
+  title,
+  active,
+  danger,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  title?: string;
+  active?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={`flex size-6 items-center justify-center rounded-md text-[11px] font-medium transition-colors ${
+        active
+          ? "bg-[var(--foreground)] text-white"
+          : danger
+            ? "text-[var(--text-tertiary)] hover:bg-[rgba(255,59,48,0.1)] hover:text-[var(--danger)]"
+            : "text-[var(--text-tertiary)] hover:bg-white/80 hover:text-[var(--foreground)]"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function FontToggle({
+  value,
+  onChange,
+}: {
+  value: SectionFont;
+  onChange: (v: SectionFont) => void;
+}) {
+  return (
+    <SegmentedControl
+      options={[
+        { value: "sans", label: "Sans" },
+        { value: "serif", label: "Serif" },
+      ]}
+      value={value}
+      onChange={onChange}
+    />
+  );
+}
+
+function AlignToggle({
+  value,
+  onChange,
+}: {
+  value: "left" | "center";
+  onChange: (v: "left" | "center") => void;
+}) {
+  return (
+    <SegmentedControl
+      options={[
+        { value: "left", label: "Left" },
+        { value: "center", label: "Center" },
+      ]}
+      value={value}
+      onChange={onChange}
+    />
+  );
+}
+
+function SegmentedControl<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="inline-flex rounded-lg bg-[rgba(0,0,0,0.06)] p-0.5">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-all ${
+            value === opt.value
+              ? "bg-white text-[var(--foreground)] shadow-[var(--shadow-sm)]"
+              : "text-[var(--text-secondary)] hover:text-[var(--foreground)]"
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SpacingFields({
+  top,
+  bottom,
+  onChange,
+}: {
+  top: number;
+  bottom: number;
+  onChange: (spacing: { top: number; bottom: number }) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      <NumberField
+        label="Top"
+        value={top}
+        onChange={(v) => onChange({ top: v, bottom })}
+      />
+      <NumberField
+        label="Bottom"
+        value={bottom}
+        onChange={(v) => onChange({ top, bottom: v })}
+      />
+    </div>
+  );
+}
+
+function ImageDropzone({
+  src,
+  onChange,
+}: {
+  src: string;
+  onChange: (src: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  function readFile(file: File) {
+    if (!file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") onChange(reader.result);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        const file = e.dataTransfer.files?.[0];
+        if (file) readFile(file);
+      }}
+      onClick={() => inputRef.current?.click()}
+      className={`cursor-pointer rounded-[var(--radius-sm)] border border-dashed p-4 text-center transition-colors ${
+        dragging
+          ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+          : "border-[var(--separator-strong)] bg-[var(--fill)] hover:bg-[var(--fill-hover)]"
+      }`}
+    >
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt=""
+          className="mx-auto mb-2 max-h-28 w-auto rounded-md object-contain"
+        />
+      ) : null}
+      <p className="text-[12px] font-medium text-[var(--text-secondary)]">
+        Drop image or click to upload
+      </p>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) readFile(file);
+        }}
+      />
     </div>
   );
 }
@@ -396,20 +1517,47 @@ function Field({
   label,
   value,
   onChange,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  placeholder?: string;
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-black/55">
+      <span className="mb-1.5 block text-[12px] font-medium text-[var(--text-secondary)]">
         {label}
       </span>
       <input
         value={value}
+        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full border border-black/20 bg-white px-2 py-2 font-serif text-sm outline-none focus:border-black"
+        className="w-full rounded-[var(--radius-sm)] border border-transparent bg-[var(--fill)] px-3 py-2 text-[13px] outline-none transition-shadow placeholder:text-[var(--text-tertiary)] focus:border-[var(--accent)] focus:bg-white focus:shadow-[0_0_0_3px_var(--accent-soft)]"
+      />
+    </label>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-[12px] font-medium text-[var(--text-secondary)]">
+        {label}
+      </span>
+      <input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value) || 0)}
+        className="w-full rounded-[var(--radius-sm)] border border-transparent bg-[var(--fill)] px-3 py-2 font-mono text-[13px] tabular-nums outline-none transition-shadow focus:border-[var(--accent)] focus:bg-white focus:shadow-[0_0_0_3px_var(--accent-soft)]"
       />
     </label>
   );
@@ -426,77 +1574,23 @@ function ColorField({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-black/55">
+      <span className="mb-1.5 block text-[12px] font-medium text-[var(--text-secondary)]">
         {label}
       </span>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 rounded-[var(--radius-sm)] bg-[var(--fill)] p-1.5 focus-within:bg-white focus-within:shadow-[0_0_0_3px_var(--accent-soft)]">
         <input
           type="color"
           value={normalizeHex(value)}
           onChange={(e) => onChange(e.target.value)}
-          className="h-9 w-10 cursor-pointer border border-black/20 bg-white p-0.5"
+          className="size-7 shrink-0 overflow-hidden rounded-md"
         />
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full border border-black/20 bg-white px-2 py-1.5 font-mono text-xs outline-none focus:border-black"
+          className="w-full bg-transparent px-1 font-mono text-[12px] outline-none"
         />
       </div>
     </label>
-  );
-}
-
-function TypeStyleField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: TextStyle;
-  onChange: (patch: Partial<TextStyle>) => void;
-}) {
-  return (
-    <div className="border border-black/15 bg-[#fafafa] p-3">
-      <p className="mb-2 text-xs uppercase tracking-[0.12em] text-black/55">
-        {label}
-      </p>
-      <div className="grid grid-cols-2 gap-3">
-        <label className="block">
-          <span className="mb-1 block text-[11px] text-black/50">
-            Size (px)
-          </span>
-          <input
-            type="number"
-            min={10}
-            max={72}
-            step={1}
-            value={value.fontSize}
-            onChange={(e) =>
-              onChange({ fontSize: Number(e.target.value) || value.fontSize })
-            }
-            className="w-full border border-black/20 bg-white px-2 py-1.5 font-mono text-sm outline-none focus:border-black"
-          />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-[11px] text-black/50">
-            Leading
-          </span>
-          <input
-            type="number"
-            min={0.8}
-            max={2.5}
-            step={0.05}
-            value={value.lineHeight}
-            onChange={(e) =>
-              onChange({
-                lineHeight: Number(e.target.value) || value.lineHeight,
-              })
-            }
-            className="w-full border border-black/20 bg-white px-2 py-1.5 font-mono text-sm outline-none focus:border-black"
-          />
-        </label>
-      </div>
-    </div>
   );
 }
 

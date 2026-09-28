@@ -1,45 +1,54 @@
 # Goe Nieuws · Newsletter builder
 
-Interface to prepare the monthly Goe Nieuws newsletter, with live email-safe HTML preview. Brevo sending comes later.
+Modular section-based newsletter editor with live email-safe HTML preview and Brevo sending.
 
 ## Stack
 
-- Next.js (App Router, static export)
-- Table-based HTML email (Outlook-friendly)
-- Times New Roman + serif fallbacks
-- Brevo stub in `src/lib/brevo.ts`
+- Next.js App Router
+- Table-based HTML email (Outlook / Gmail / Apple Mail)
+- Helvetica/Arial (sans) + Georgia (serif)
+- Brevo transactional + campaign send via `/api/send`
 
 ## Local
 
 ```bash
 npm install
+cp .env.example .env.local   # fill BREVO_API_KEY + BREVO_SENDER_EMAIL
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## Structure
+
+The draft is a list of **sections**, each with:
+
+- `font`: `sans` | `serif`
+- `dividerAfter`: dotted `····` separator
+- `blocks`: `text` | `image` (drag-drop) | `meta` | `framedTitle`
+
+Spacing tokens (`text` / `image` / `divider` / `padX`) set defaults; each block can override pad top/bottom.
+
+## Brevo
+
+Needs a **Node server** (local or Vercel). GitHub Pages is static — send won’t work there.
+
+| Env | Role |
+|-----|------|
+| `BREVO_API_KEY` | API key |
+| `BREVO_SENDER_EMAIL` | Verified sender |
+| `BREVO_SENDER_NAME` | Optional display name |
+| `BREVO_LIST_ID` | Optional default campaign list |
+
+- **Send test** → transactional `POST /v3/smtp/email`
+- **Send to list** → create campaign + `sendNow`
+
+Images in the HTML must be absolute URLs when sending (preview already rewrites with the current origin). Data-URL uploads work for tests but are heavy; prefer hosted `/assets/…` or a CDN for production sends.
+
 ## GitHub Pages
 
-Public URL (after first deploy):
+Public URL after deploy:
 
 **https://remyd1999-tech.github.io/goe-nieuws-newsletter/**
 
-1. Repo → **Settings → Pages**
-2. Source: **GitHub Actions**
-3. Push to `main` (or run the **Deploy GitHub Pages** workflow)
-
-Build uses `GITHUB_PAGES=true` → `basePath` `/goe-nieuws-newsletter`.
-
-## Newsletter structure
-
-1. Logo  
-2. Tagline  
-3. Cover  
-4. Label (e.g. `CHAPTER TWO`)  
-5. Title  
-6. Body (paragraphs + images)  
-7. Socials + note + Brevo `{{ unsubscribe }}`
-
-## Brevo (later)
-
-Needs a server (not GitHub Pages). Use Vercel/Netlify or a small API for sending.
+Build sets `GITHUB_PAGES=true` → static `output: "export"` (no API).

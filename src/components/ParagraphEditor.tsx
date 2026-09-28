@@ -16,7 +16,7 @@ type ParagraphEditorProps = {
 export function ParagraphEditor({
   value,
   onChange,
-  placeholder = "Write the paragraph… select a word to format it",
+  placeholder = "Write the paragraph…",
   compact = false,
 }: ParagraphEditorProps) {
   const editor = useEditor({
@@ -44,8 +44,8 @@ export function ParagraphEditor({
     editorProps: {
       attributes: {
         class: compact
-          ? "min-h-[64px] px-2 py-2 font-serif text-sm leading-relaxed outline-none"
-          : "min-h-[120px] px-2 py-2 font-serif text-sm leading-relaxed outline-none",
+          ? "min-h-[56px] px-3 py-2.5 text-[13px] leading-relaxed outline-none"
+          : "min-h-[104px] px-3 py-2.5 text-[13px] leading-relaxed outline-none",
       },
     },
   });
@@ -61,22 +61,28 @@ export function ParagraphEditor({
   if (!editor) return null;
 
   return (
-    <div className="border border-black/20 bg-white focus-within:border-black">
-      <div className="flex flex-wrap gap-1 border-b border-black/10 bg-[#f7f7f7] p-1.5">
+    <div className="overflow-hidden rounded-[var(--radius-sm)] bg-[var(--fill)] focus-within:bg-white focus-within:shadow-[0_0_0_3px_var(--accent-soft)]">
+      <div className="flex gap-0.5 border-b border-[var(--separator)] px-1.5 py-1">
         <ToolbarButton
-          label="Bold"
+          label="B"
+          title="Bold"
           active={editor.isActive("bold")}
           onClick={() => editor.chain().focus().toggleBold().run()}
+          className="font-semibold"
         />
         <ToolbarButton
-          label="Italic"
+          label="I"
+          title="Italic"
           active={editor.isActive("italic")}
           onClick={() => editor.chain().focus().toggleItalic().run()}
+          className="italic"
         />
         <ToolbarButton
-          label="Underline"
+          label="U"
+          title="Underline"
           active={editor.isActive("underline")}
           onClick={() => editor.chain().focus().toggleUnderline().run()}
+          className="underline"
         />
       </div>
       <EditorContent editor={editor} />
@@ -86,21 +92,26 @@ export function ParagraphEditor({
 
 function ToolbarButton({
   label,
+  title,
   active,
   onClick,
+  className = "",
 }: {
   label: string;
+  title: string;
   active: boolean;
   onClick: () => void;
+  className?: string;
 }) {
   return (
     <button
       type="button"
+      title={title}
       onClick={onClick}
-      className={`border px-2 py-1 text-xs ${
+      className={`flex size-7 items-center justify-center rounded-md text-[12px] transition-colors ${className} ${
         active
-          ? "border-black bg-black text-white"
-          : "border-black/25 bg-white hover:border-black"
+          ? "bg-[var(--foreground)] text-white"
+          : "text-[var(--text-secondary)] hover:bg-white/70 hover:text-[var(--foreground)]"
       }`}
     >
       {label}

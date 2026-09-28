@@ -5,7 +5,9 @@ const isGithubPages = process.env.GITHUB_PAGES === "true";
 const basePath = isGithubPages ? `/${repoName}` : "";
 
 const nextConfig: NextConfig = {
-  output: "export",
+  // Static export only for GitHub Pages (no API routes there).
+  // Local / Vercel keep Node so /api/send (Brevo) works.
+  ...(isGithubPages ? { output: "export" as const } : {}),
   basePath,
   assetPrefix: basePath || undefined,
   images: { unoptimized: true },
