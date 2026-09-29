@@ -1,28 +1,39 @@
-/** Vertical padding in px (email-safe). */
+/** Padding in px (email-safe). */
 export type BlockSpacing = {
   top: number;
   bottom: number;
+  left: number;
+  right: number;
+};
+
+/** Desktop + optional mobile-only padding overrides. */
+export type SpacedBlock = {
+  spacing?: Partial<BlockSpacing>;
+  /** Applied under EMAIL_MOBILE_BREAKPOINT; inherits desktop when omitted. */
+  mobileSpacing?: Partial<BlockSpacing>;
 };
 
 export type TextAlign = "left" | "center";
 export type SectionFont = "sans" | "serif";
 
-export type ImageBlock = {
+export type ImageBlock = SpacedBlock & {
   id: string;
   type: "image";
   src: string;
   alt: string;
   /** Display width in px (Figma). Defaults to content width. */
   width?: number;
+  /** Mobile-only width; inherits `width` when omitted. */
+  mobileWidth?: number;
   /**
    * Edge-to-edge: zero side padding + vertical gaps, image spans email width.
    */
   fullBleed?: boolean;
-  /** Override default image gaps; omit to use global tokens. */
-  spacing?: Partial<BlockSpacing>;
+  /** Mobile-only full bleed; inherits `fullBleed` when omitted. */
+  mobileFullBleed?: boolean;
 };
 
-export type TextBlock = {
+export type TextBlock = SpacedBlock & {
   id: string;
   type: "text";
   html: string;
@@ -36,35 +47,64 @@ export type TextBlock = {
   fontSize?: number;
   /** unitless or px line-height override. */
   lineHeight?: number;
-  spacing?: Partial<BlockSpacing>;
 };
 
 /** SEIZOEN … | NIEUWSBRIEF … row */
-export type MetaBlock = {
+export type MetaBlock = SpacedBlock & {
   id: string;
   type: "meta";
   left: string;
   right: string;
-  spacing?: Partial<BlockSpacing>;
 };
 
-/** Boxed title like “Anatomie van aanraking” — Helvetica 28 / border 2px in Figma */
-export type FramedTitleBlock = {
+/**
+ * Boxed title like “Anatomie van aanraking”.
+ * Fixed pixel box (does not fluid-scale with the viewport).
+ */
+export type FramedTitleBlock = SpacedBlock & {
   id: string;
   type: "framedTitle";
   html: string;
   /** Border thickness in px. Defaults to 2. */
+  borderWidth?: number;
+  /**
+   * @deprecated Migrated to `borderWidth`.
+   */
   width?: number;
-  /** Box height in px. Omit to size from content + padding. */
+  /** Fixed box width in px. Defaults to 402. */
+  boxWidth?: number;
+  /** Fixed box height in px. Defaults to 52. */
+  boxHeight?: number;
+  /**
+   * @deprecated Migrated to `boxHeight`.
+   */
   height?: number;
-  spacing?: Partial<BlockSpacing>;
+  mobileBoxWidth?: number;
+  mobileBoxHeight?: number;
+  mobileBorderWidth?: number;
 };
 
 /** Dotted separator (Figma Line 49 PNG). */
-export type DividerBlock = {
+export type DividerBlock = SpacedBlock & {
   id: string;
   type: "divider";
-  spacing?: Partial<BlockSpacing>;
+};
+
+/** Centered tagline above the closing logo / footer bar. */
+export type TaglineBlock = SpacedBlock & {
+  id: string;
+  type: "tagline";
+  text: string;
+};
+
+/** Dark (or light) closing bar with note + links. */
+export type FooterBarBlock = SpacedBlock & {
+  id: string;
+  type: "footerBar";
+  note: string;
+  links: { label: string; href: string }[];
+  /** Full-bleed black bar */
+  dark?: boolean;
 };
 
 export type BodyBlock =
@@ -72,7 +112,9 @@ export type BodyBlock =
   | TextBlock
   | MetaBlock
   | FramedTitleBlock
-  | DividerBlock;
+  | DividerBlock
+  | TaglineBlock
+  | FooterBarBlock;
 
 export type Section = {
   id: string;
@@ -107,6 +149,10 @@ export type SpacingTokens = {
   image: number;
   /** Top/bottom around dotted section dividers (Figma ≈ 20–21px) */
   divider: number;
+  /** Diameter of divider dots (Figma Line 49 ≈ 3px) */
+  dotSize: number;
+  /** Empty space between divider dots (Figma pitch 20 − size 3 ≈ 17px) */
+  dotSpacing: number;
   /** Horizontal content padding (Figma text x=28) */
   padX: number;
   /** Email canvas width (Figma frame) */
@@ -130,6 +176,10 @@ export type NewsletterTypography = {
   taglineLineHeight: number;
 };
 
+/**
+ * @deprecated Prefer tagline / image / footerBar blocks.
+ * Kept for migration of older drafts.
+ */
 export type NewsletterFooter = {
   note: string;
   links: { label: string; href: string }[];
@@ -142,6 +192,10 @@ export type NewsletterFooter = {
 export type NewsletterDraft = {
   subject: string;
   sections: Section[];
+  /**
+   * Legacy footer blob — migrated into blocks on load.
+   * New drafts keep an empty stub.
+   */
   footer: NewsletterFooter;
   colors: NewsletterColors;
   spacing: SpacingTokens;
@@ -152,12 +206,22 @@ export type NewsletterDraft = {
    */
   mobileSpacing?: Partial<SpacingTokens>;
   mobileTypography?: Partial<NewsletterTypography>;
-  /** Path to Figma dotted divider PNG */
+  /**
+   * @deprecated Dividers are rendered as HTML dots (`colors.divider`).
+   * Kept so older drafts still load.
+   */
   dividerSrc: string;
 };
 
 /** CSS px breakpoint for email mobile overrides / preview. */
 export const EMAIL_MOBILE_BREAKPOINT = 480;
+/** Reference content canvas for mobile preview / dot counts (matches builder iframe). */
+export const EMAIL_MOBILE_WIDTH = 390;
+
+/** Default framed title box (Figma content width). */
+export const DEFAULT_FRAMED_BOX_WIDTH = 402;
+export const DEFAULT_FRAMED_BOX_HEIGHT = 52;
+export const DEFAULT_FRAMED_BORDER = 2;
 
 export function resolveMobileSpacing(draft: NewsletterDraft): SpacingTokens {
   return { ...draft.spacing, ...draft.mobileSpacing };
@@ -181,6 +245,8 @@ export const defaultSpacing: SpacingTokens = {
   text: 23,
   image: 20,
   divider: 20,
+  dotSize: 3,
+  dotSpacing: 17,
   padX: 28,
   emailWidth: 458,
   imageWidth: 402,
@@ -218,19 +284,89 @@ export const defaultTypography: NewsletterTypography = {
   taglineLineHeight: 1.2,
 };
 
+export const emptyFooter: NewsletterFooter = {
+  note: "",
+  links: [],
+  dark: true,
+};
+
 export function resolveSpacing(
   block: BodyBlock,
   tokens: SpacingTokens,
+  mode: "desktop" | "mobile" = "desktop",
 ): BlockSpacing {
-  const defaults: BlockSpacing =
-    block.type === "image"
-      ? { top: tokens.image, bottom: tokens.image }
-      : block.type === "divider"
-        ? { top: tokens.divider, bottom: tokens.divider }
-        : { top: 0, bottom: tokens.text };
+  const pad = tokens.padX;
+  let defaults: BlockSpacing;
+  if (block.type === "image") {
+    const w =
+      mode === "mobile"
+        ? (block.mobileWidth ?? block.width ?? tokens.imageWidth)
+        : (block.width ?? tokens.imageWidth);
+    const side = Math.max(0, Math.round((tokens.emailWidth - w) / 2));
+    defaults = {
+      top: tokens.image,
+      bottom: tokens.image,
+      left: side,
+      right: side,
+    };
+  } else if (block.type === "divider") {
+    defaults = {
+      top: tokens.divider,
+      bottom: tokens.divider,
+      left: pad,
+      right: pad,
+    };
+  } else if (block.type === "footerBar") {
+    defaults = { top: 28, bottom: 28, left: pad, right: pad };
+  } else if (block.type === "tagline") {
+    defaults = { top: 24, bottom: 8, left: pad, right: pad };
+  } else if (block.type === "meta") {
+    defaults = { top: 0, bottom: tokens.text, left: pad, right: pad };
+  } else {
+    defaults = { top: 0, bottom: tokens.text, left: pad, right: pad };
+  }
+
+  const patch =
+    mode === "mobile"
+      ? { ...block.spacing, ...block.mobileSpacing }
+      : block.spacing;
 
   return {
-    top: block.spacing?.top ?? defaults.top,
-    bottom: block.spacing?.bottom ?? defaults.bottom,
+    top: patch?.top ?? defaults.top,
+    bottom: patch?.bottom ?? defaults.bottom,
+    left: patch?.left ?? defaults.left,
+    right: patch?.right ?? defaults.right,
   };
+}
+
+export function resolveFramedTitle(
+  block: FramedTitleBlock,
+  mode: "desktop" | "mobile" = "desktop",
+): {
+  borderWidth: number;
+  boxWidth: number;
+  boxHeight: number;
+} {
+  const desktop = {
+    borderWidth: block.borderWidth ?? block.width ?? DEFAULT_FRAMED_BORDER,
+    boxWidth: block.boxWidth ?? DEFAULT_FRAMED_BOX_WIDTH,
+    boxHeight:
+      block.boxHeight ?? block.height ?? DEFAULT_FRAMED_BOX_HEIGHT,
+  };
+  if (mode === "desktop") return desktop;
+  return {
+    borderWidth: block.mobileBorderWidth ?? desktop.borderWidth,
+    boxWidth: block.mobileBoxWidth ?? desktop.boxWidth,
+    boxHeight: block.mobileBoxHeight ?? desktop.boxHeight,
+  };
+}
+
+export function resolveImageFullBleed(
+  block: ImageBlock,
+  mode: "desktop" | "mobile" = "desktop",
+): boolean {
+  if (mode === "mobile") {
+    return block.mobileFullBleed ?? Boolean(block.fullBleed);
+  }
+  return Boolean(block.fullBleed);
 }

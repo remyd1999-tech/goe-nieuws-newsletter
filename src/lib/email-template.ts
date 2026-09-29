@@ -1,13 +1,18 @@
 import type {
   BodyBlock,
   DividerBlock,
+  FooterBarBlock,
   NewsletterDraft,
   Section,
   SectionFont,
   SpacingTokens,
+  TaglineBlock,
 } from "./types";
 import {
   EMAIL_MOBILE_BREAKPOINT,
+  EMAIL_MOBILE_WIDTH,
+  resolveFramedTitle,
+  resolveImageFullBleed,
   resolveMobileSpacing,
   resolveMobileTypography,
   resolveSpacing,
@@ -45,7 +50,7 @@ function usesTextGapDefault(
   block: BodyBlock,
   tokens: SpacingTokens,
 ): boolean {
-  const s = resolveSpacing(block, tokens);
+  const s = resolveSpacing(block, tokens, "desktop");
   return s.top === 0 && s.bottom === tokens.text;
 }
 
@@ -53,8 +58,72 @@ function usesImageGapDefault(
   block: BodyBlock,
   tokens: SpacingTokens,
 ): boolean {
-  const s = resolveSpacing(block, tokens);
+  const s = resolveSpacing(block, tokens, "desktop");
   return s.top === tokens.image && s.bottom === tokens.image;
+}
+
+function usesPadXDefault(block: BodyBlock, tokens: SpacingTokens): boolean {
+  const s = resolveSpacing(block, tokens, "desktop");
+  return s.left === tokens.padX && s.right === tokens.padX;
+}
+
+function usesDividerGapDefault(
+  block: BodyBlock,
+  tokens: SpacingTokens,
+): boolean {
+  const s = resolveSpacing(block, tokens, "desktop");
+  return s.top === tokens.divider && s.bottom === tokens.divider;
+}
+
+function cssSafeId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+function blockPadClass(blockId: string): string {
+  return `gn-pad-${cssSafeId(blockId)}`;
+}
+
+/** Per-block mobile padding (+ framed / image size) overrides. */
+function mobileBlockRules(draft: NewsletterDraft): string {
+  const tokens = resolveMobileSpacing(draft);
+  const rules: string[] = [];
+  for (const section of draft.sections) {
+    for (const block of section.blocks) {
+      const safe = cssSafeId(block.id);
+      if (block.type === "image") {
+        const mobileBleed = resolveImageFullBleed(block, "mobile");
+        if (mobileBleed) {
+          const s = resolveSpacing(block, tokens, "mobile");
+          rules.push(
+            `.gn-pad-${safe}{padding:${s.top}px 0 ${s.bottom}px 0 !important;}`,
+            `.gn-img-${safe}{max-width:100% !important;width:100% !important;height:auto !important;}`,
+          );
+          continue;
+        }
+        const s = resolveSpacing(block, tokens, "mobile");
+        rules.push(
+          `.gn-pad-${safe}{padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px !important;}`,
+        );
+        const w = block.mobileWidth ?? block.width ?? tokens.imageWidth;
+        rules.push(
+          `.gn-img-${safe}{max-width:${w}px !important;width:100% !important;height:auto !important;}`,
+        );
+        continue;
+      }
+      const s = resolveSpacing(block, tokens, "mobile");
+      rules.push(
+        `.gn-pad-${safe}{padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px !important;}`,
+      );
+      if (block.type === "framedTitle") {
+        const f = resolveFramedTitle(block, "mobile");
+        rules.push(
+          `.gn-framed-box-${safe}{width:100% !important;max-width:100% !important;height:auto !important;min-height:${f.boxHeight}px !important;}`,
+          `.gn-framed-box-${safe} td{width:100% !important;max-width:100% !important;height:auto !important;min-height:${f.boxHeight}px !important;border-width:${f.borderWidth}px !important;}`,
+        );
+      }
+    }
+  }
+  return rules.join("\n      ");
 }
 
 /** Mobile overrides — classes + !important so they beat inline desktop styles. */
@@ -62,6 +131,8 @@ function mobileStyleBlock(draft: NewsletterDraft): string {
   const t = resolveMobileTypography(draft);
   const s = resolveMobileSpacing(draft);
   const bp = EMAIL_MOBILE_BREAKPOINT;
+  const perBlock = mobileBlockRules(draft);
+  const mobDot = Math.max(1, Math.round(s.dotSize ?? 3));
   return `
   <style type="text/css">
     @media only screen and (max-width:${bp}px) {
@@ -76,39 +147,197 @@ function mobileStyleBlock(draft: NewsletterDraft): string {
       .gn-gap-image { padding-top:${s.image}px !important; padding-bottom:${s.image}px !important; }
       .gn-gap-divider { padding-top:${s.divider}px !important; padding-bottom:${s.divider}px !important; }
       .gn-img-cell { padding-left:${s.padX}px !important; padding-right:${s.padX}px !important; }
-      /* Inset images only — never apply imageWidth to full-bleed. */
-      .gn-img { max-width:${s.imageWidth}px !important; width:100% !important; height:auto !important; }
-      .gn-img-bleed { padding:0 !important; }
-      .gn-img-full { max-width:100% !important; width:100% !important; height:auto !important; }
+      .gn-dot {
+        width:${mobDot}px !important;
+        height:${mobDot}px !important;
+        min-width:${mobDot}px !important;
+        min-height:${mobDot}px !important;
+      }
+      .gn-dot-cell {
+        width:${mobDot}px !important;
+      }
+      .gn-dot-d-only { display:none !important; }
+      .gn-dot-m-only { display:table-cell !important; }
+      ${perBlock}
+      /* Fluid canvas — must win over fixed desktop px widths. */
+      .gn-shell {
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+      .gn-shell td {
+        word-break: break-word !important;
+        overflow-wrap: anywhere !important;
+      }
+      .gn-shell img,
+      .gn-img,
+      .gn-img-full {
+        max-width: 100% !important;
+        width: 100% !important;
+        height: auto !important;
+      }
+      .gn-framed-box,
+      .gn-framed-box td {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto !important;
+      }
     }
   </style>`;
 }
 
-function usesDividerGapDefault(
-  block: BodyBlock,
-  tokens: SpacingTokens,
-): boolean {
-  const s = resolveSpacing(block, tokens);
-  return s.top === tokens.divider && s.bottom === tokens.divider;
+function dotCount(contentWidth: number, size: number, gap: number): number {
+  const safeSize = Math.max(1, Math.round(size));
+  const pitch = safeSize + Math.max(0, Math.round(gap));
+  return Math.max(2, Math.floor((contentWidth - safeSize) / pitch) + 1);
 }
 
-/** Figma Line 49 — dashed round-cap dots as PNG */
+/**
+ * Dots flush to content edges (Left/Right padding on the cell); gaps only between dots.
+ * Extra desktop/mobile dots (+ their adjacent spacers) toggle via CSS classes.
+ */
+function dividerDotsHtml(
+  color: string,
+  desktop: { contentWidth: number; size: number; gap: number },
+  mobile: { contentWidth: number; size: number; gap: number },
+): string {
+  const deskSize = Math.max(1, Math.round(desktop.size));
+  const deskCount = dotCount(desktop.contentWidth, desktop.size, desktop.gap);
+  const mobCount = dotCount(mobile.contentWidth, mobile.size, mobile.gap);
+  const count = Math.max(deskCount, mobCount);
+  const safeColor = escapeHtml(color);
+  const cells: string[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const dotMode =
+      i >= mobCount && i < deskCount
+        ? "gn-dot-d-only"
+        : i >= deskCount && i < mobCount
+          ? "gn-dot-m-only"
+          : "";
+    // Cell width = dot size, so align is moot; first/last sit on the table edges
+    // because spacers (not half-cells) absorb the free space between dots.
+    cells.push(
+      `<td align="${i === 0 ? "left" : i === count - 1 ? "right" : "center"}" valign="middle" width="${deskSize}"` +
+        ` class="gn-dot-cell${dotMode ? ` ${dotMode}` : ""}"` +
+        ` style="width:${deskSize}px;padding:0;margin:0;font-size:0;line-height:0;${i >= deskCount ? "display:none;" : ""}">` +
+        `<span class="gn-dot" style="display:inline-block;width:${deskSize}px;height:${deskSize}px;min-width:${deskSize}px;min-height:${deskSize}px;background-color:${safeColor};border-radius:50%;"></span>` +
+        `</td>`,
+    );
+
+    if (i < count - 1) {
+      // Spacer between dots i and i+1 — only when both sides can show on that mode.
+      const gapMode =
+        i >= mobCount - 1 && i < deskCount - 1
+          ? "gn-dot-d-only"
+          : i >= deskCount - 1 && i < mobCount - 1
+            ? "gn-dot-m-only"
+            : "";
+      cells.push(
+        `<td${gapMode ? ` class="${gapMode}"` : ""}` +
+          ` style="padding:0;margin:0;font-size:0;line-height:0;${i >= deskCount - 1 ? "display:none;" : ""}">&nbsp;</td>`,
+      );
+    }
+  }
+
+  return (
+    `<table role="presentation" class="gn-dots" width="100%" cellspacing="0" cellpadding="0" border="0" ` +
+    `style="width:100%;max-width:100%;border-collapse:collapse;table-layout:fixed;mso-table-lspace:0pt;mso-table-rspace:0pt;">` +
+    `<tr>${cells.join("")}</tr></table>`
+  );
+}
+
 function dividerBlockHtml(
   block: DividerBlock,
   draft: NewsletterDraft,
-  abs: (src: string) => string,
   interactive?: boolean,
 ): string {
   const sp = draft.spacing;
+  const mob = resolveMobileSpacing(draft);
   const s = resolveSpacing(block, sp);
-  const padX = 19; // Figma line x=18, width=420 → side ≈19
-  const src = abs(draft.dividerSrc || "/assets/divider-dots.png");
+  const sMob = resolveSpacing(block, mob, "mobile");
   const gapClass = usesDividerGapDefault(block, sp) ? "gn-gap-divider" : null;
+  const padClass = usesPadXDefault(block, sp) ? "gn-px" : null;
+  const marker = blockMarker(block.id, interactive);
+  // Fill the padded cell — Left/Right control inset like text (0 = full bleed).
+  const contentW = Math.max(1, sp.emailWidth - s.left - s.right);
+  const mobileContentW = Math.max(
+    1,
+    EMAIL_MOBILE_WIDTH - sMob.left - sMob.right,
+  );
+  const color = draft.colors.divider || "#000000";
+  return `
+    <tr${marker}>
+      <td align="center"${cls(blockPadClass(block.id), padClass, gapClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;font-size:0;line-height:0;">
+        ${dividerDotsHtml(
+          color,
+          {
+            contentWidth: contentW,
+            size: sp.dotSize ?? 3,
+            gap: sp.dotSpacing ?? 17,
+          },
+          {
+            contentWidth: mobileContentW,
+            size: mob.dotSize ?? 3,
+            gap: mob.dotSpacing ?? 17,
+          },
+        )}
+      </td>
+    </tr>`;
+}
+
+function taglineBlockHtml(
+  block: TaglineBlock,
+  draft: NewsletterDraft,
+  interactive?: boolean,
+): string {
+  const c = draft.colors;
+  const t = draft.typography;
+  const sp = draft.spacing;
+  const s = resolveSpacing(block, sp);
+  const padClass = usesPadXDefault(block, sp) ? "gn-px" : null;
   const marker = blockMarker(block.id, interactive);
   return `
     <tr${marker}>
-      <td align="center"${cls("gn-px", gapClass)} style="padding:${s.top}px ${padX}px ${s.bottom}px ${padX}px;font-size:0;line-height:0;">
-        <img src="${escapeHtml(src)}" alt="" width="420" height="3" style="display:block;margin:0 auto;width:100%;max-width:420px;height:auto;border:0;outline:none;" />
+      <td align="center"${cls("gn-tagline", blockPadClass(block.id), padClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;font-family:${FONT_SANS};font-size:${t.taglineSize}px;line-height:${t.taglineLineHeight};color:${escapeHtml(c.body)};text-align:center;">
+        ${escapeHtml(block.text)}
+      </td>
+    </tr>`;
+}
+
+function footerBarBlockHtml(
+  block: FooterBarBlock,
+  draft: NewsletterDraft,
+  interactive?: boolean,
+): string {
+  const c = draft.colors;
+  const t = draft.typography;
+  const sp = draft.spacing;
+  const s = resolveSpacing(block, sp);
+  const dark = block.dark !== false;
+  const bg = dark ? c.footerBg : c.backgroundCard;
+  const fg = dark ? c.footerText : c.body;
+  const marker = blockMarker(block.id, interactive);
+
+  const links = block.links
+    .map(
+      (l) =>
+        `<a href="${escapeHtml(l.href)}" class="gn-footer" style="color:${escapeHtml(fg)};text-decoration:underline;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};">${escapeHtml(l.label)}</a>`,
+    )
+    .join(
+      ` <span class="gn-footer" style="color:${escapeHtml(fg)};font-family:${FONT_SERIF};font-size:${t.footerSize}px;"> / </span> `,
+    );
+
+  const unsub = `<a href="{{ unsubscribe }}" class="gn-footer" style="color:${escapeHtml(fg)};text-decoration:underline;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};">Unsubscribe</a>`;
+
+  return `
+    <tr${marker}>
+      <td align="center"${cls(blockPadClass(block.id))} bgcolor="${escapeHtml(bg)}" style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;background-color:${escapeHtml(bg)};text-align:center;">
+        <p class="gn-footer" style="margin:0 0 8px 0;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};color:${escapeHtml(fg)};text-align:center;">
+          ${escapeHtml(block.note)}
+        </p>
+        <p class="gn-footer" style="margin:0;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};color:${escapeHtml(fg)};text-align:center;">
+          ${links}${links ? ` <span class="gn-footer" style="color:${escapeHtml(fg)};"> / </span> ` : ""}${unsub}
+        </p>
       </td>
     </tr>`;
 }
@@ -128,41 +357,51 @@ function blockHtml(
   const t = draft.typography;
   const sp = draft.spacing;
   const s = resolveSpacing(block, sp);
-  const padX = sp.padX;
   const marker = blockMarker(block.id, interactive);
 
   if (block.type === "divider") {
-    return dividerBlockHtml(block, draft, abs, interactive);
+    return dividerBlockHtml(block, draft, interactive);
+  }
+
+  if (block.type === "tagline") {
+    return taglineBlockHtml(block, draft, interactive);
+  }
+
+  if (block.type === "footerBar") {
+    return footerBarBlockHtml(block, draft, interactive);
   }
 
   if (block.type === "image") {
-    if (block.fullBleed) {
+    const safe = cssSafeId(block.id);
+    const padCls = blockPadClass(block.id);
+    const desktopBleed = resolveImageFullBleed(block, "desktop");
+    if (desktopBleed) {
       const w = sp.emailWidth;
-      // True edge-to-edge: zero padding, ignore Pad X / Image width / per-image width.
+      // Full bleed: horizontal flush, Top/Bottom still apply.
       return `
     <tr${marker}>
-      <td align="center" class="gn-img-bleed" style="padding:0;font-size:0;line-height:0;">
-        <img class="gn-img-full" src="${escapeHtml(abs(block.src))}" alt="${escapeHtml(block.alt)}" width="${w}" style="display:block;margin:0;width:100%;max-width:${w}px;height:auto;border:0;outline:none;text-decoration:none;" />
+      <td align="center"${cls(padCls, "gn-img-bleed")} style="padding:${s.top}px 0 ${s.bottom}px 0;font-size:0;line-height:0;">
+        <img class="gn-img-full gn-img-${safe}" src="${escapeHtml(abs(block.src))}" alt="${escapeHtml(block.alt)}" width="${w}" style="display:block;margin:0;width:100%;max-width:${w}px;height:auto;border:0;outline:none;text-decoration:none;" />
       </td>
     </tr>`;
     }
     const w = block.width ?? sp.imageWidth;
-    const side = Math.max(0, Math.round((sp.emailWidth - w) / 2));
     const gapClass = usesImageGapDefault(block, sp) ? "gn-gap-image" : null;
+    const padClass = usesPadXDefault(block, sp) ? "gn-img-cell" : null;
+    const imgClass = `gn-img gn-img-${safe}`;
     return `
     <tr${marker}>
-      <td align="center"${cls("gn-img-cell", gapClass)} style="padding:${s.top}px ${side}px ${s.bottom}px ${side}px;">
-        <img class="gn-img" src="${escapeHtml(abs(block.src))}" alt="${escapeHtml(block.alt)}" width="${w}" style="display:block;margin:0 auto;width:100%;max-width:${w}px;height:auto;border:0;outline:none;text-decoration:none;" />
+      <td align="center"${cls(padCls, padClass, gapClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;">
+        <img class="${imgClass}" src="${escapeHtml(abs(block.src))}" alt="${escapeHtml(block.alt)}" width="${w}" style="display:block;margin:0 auto;width:100%;max-width:${w}px;height:auto;border:0;outline:none;text-decoration:none;" />
       </td>
     </tr>`;
   }
 
   if (block.type === "meta") {
-    // Figma: left x=19, right ends near 440; pad ≈19
     const gapClass = usesTextGapDefault(block, sp) ? "gn-gap-text" : null;
     return `
     <tr${marker}>
-      <td${cls("gn-px", gapClass)} style="padding:${s.top}px 19px ${s.bottom}px 19px;">
+      <td${cls(blockPadClass(block.id), gapClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;">
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;">
           <tr>
             <td align="left" valign="middle" class="gn-meta" style="font-family:${FONT_SANS};font-size:${t.metaSize}px;line-height:${t.metaLineHeight};font-weight:400;text-transform:uppercase;color:${escapeHtml(c.meta)};">
@@ -178,20 +417,16 @@ function blockHtml(
   }
 
   if (block.type === "framedTitle") {
-    // Figma: Helvetica Neue 28/29, border 2px solid black, full content width
     const safe = sanitizeRichHtml(block.html);
     const gapClass = usesTextGapDefault(block, sp) ? "gn-gap-text" : null;
-    const borderW = block.width ?? 2;
-    const boxH = block.height;
-    const heightAttr = boxH != null ? ` height="${boxH}"` : "";
-    const heightStyle = boxH != null ? `height:${boxH}px;` : "";
-    const padY = boxH != null ? 0 : 10;
+    const { borderWidth, boxWidth, boxHeight } = resolveFramedTitle(block);
+    const framedBoxClass = `gn-framed-box gn-framed-box-${cssSafeId(block.id)}`;
     return `
     <tr${marker}>
-      <td align="center"${cls("gn-px", gapClass)} style="padding:${s.top}px ${padX}px ${s.bottom}px ${padX}px;">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;max-width:402px;margin:0 auto;">
+      <td align="center"${cls(blockPadClass(block.id), gapClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;">
+        <table role="presentation" class="${framedBoxClass}" width="${boxWidth}" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;width:${boxWidth}px;max-width:${boxWidth}px;height:${boxHeight}px;margin:0 auto;">
           <tr>
-            <td align="center" valign="middle" class="gn-framed"${heightAttr} style="border:${borderW}px solid ${escapeHtml(c.framedBorder)};${heightStyle}padding:${padY}px 16px;font-family:${FONT_SANS};font-size:${t.framedSize}px;line-height:${t.framedLineHeight};font-weight:400;color:${escapeHtml(c.body)};">
+            <td align="center" valign="middle" class="gn-framed" width="${boxWidth}" height="${boxHeight}" style="border:${borderWidth}px solid ${escapeHtml(c.framedBorder)};width:${boxWidth}px;height:${boxHeight}px;max-width:${boxWidth}px;padding:0 16px;font-family:${FONT_SANS};font-size:${t.framedSize}px;line-height:${t.framedLineHeight};font-weight:400;color:${escapeHtml(c.body)};">
               ${safe}
             </td>
           </tr>
@@ -219,67 +454,11 @@ function blockHtml(
         : "gn-sans"
       : null;
   const gapClass = usesTextGapDefault(block, sp) ? "gn-gap-text" : null;
+  const padClass = usesPadXDefault(block, sp) ? "gn-px" : null;
   return `
     <tr${marker}>
-      <td align="${align}"${cls("gn-px", typeClass, gapClass)} style="padding:${s.top}px ${padX}px ${s.bottom}px ${padX}px;font-family:${stack};font-size:${size}px;line-height:${lh};font-weight:400;color:${escapeHtml(c.body)};text-align:${align};">
+      <td align="${align}"${cls(blockPadClass(block.id), padClass, typeClass, gapClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;font-family:${stack};font-size:${size}px;line-height:${lh};font-weight:400;color:${escapeHtml(c.body)};text-align:${align};">
         ${safe}
-      </td>
-    </tr>`;
-}
-
-function footerHtml(
-  draft: NewsletterDraft,
-  abs: (src: string) => string,
-  interactive?: boolean,
-): string {
-  const c = draft.colors;
-  const t = draft.typography;
-  const sp = draft.spacing;
-  const dark = draft.footer.dark;
-  const bg = dark ? c.footerBg : c.backgroundCard;
-  const fg = dark ? c.footerText : c.body;
-  const marker = interactive ? ` data-gn-target="footer"` : "";
-
-  const links = draft.footer.links
-    .map(
-      (l) =>
-        `<a href="${escapeHtml(l.href)}" class="gn-footer" style="color:${escapeHtml(fg)};text-decoration:underline;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};">${escapeHtml(l.label)}</a>`,
-    )
-    .join(
-      ` <span class="gn-footer" style="color:${escapeHtml(fg)};font-family:${FONT_SERIF};font-size:${t.footerSize}px;"> / </span> `,
-    );
-
-  const unsub = `<a href="{{ unsubscribe }}" class="gn-footer" style="color:${escapeHtml(fg)};text-decoration:underline;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};">Unsubscribe</a>`;
-
-  const tagline = draft.footer.tagline
-    ? `
-    <tr${marker}>
-      <td align="center" class="gn-tagline gn-px" style="padding:24px 9px 8px 9px;font-family:${FONT_SANS};font-size:${t.taglineSize}px;line-height:${t.taglineLineHeight};color:${escapeHtml(c.body)};text-align:center;">
-        ${escapeHtml(draft.footer.tagline)}
-      </td>
-    </tr>`
-    : "";
-
-  const footerLogo = draft.footer.logoSrc
-    ? `
-    <tr${marker}>
-      <td align="center" class="gn-px" style="padding:0 17px 16px 17px;">
-        <img class="gn-img" src="${escapeHtml(abs(draft.footer.logoSrc))}" alt="Goe Nieuws" width="423" style="display:block;margin:0 auto;width:100%;max-width:423px;height:auto;border:0;" />
-      </td>
-    </tr>`
-    : "";
-
-  return `
-    ${tagline}
-    ${footerLogo}
-    <tr${marker}>
-      <td align="center" class="gn-px" bgcolor="${escapeHtml(bg)}" style="padding:28px ${sp.padX}px;background-color:${escapeHtml(bg)};text-align:center;">
-        <p class="gn-footer" style="margin:0 0 8px 0;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};color:${escapeHtml(fg)};text-align:center;">
-          ${escapeHtml(draft.footer.note)}
-        </p>
-        <p class="gn-footer" style="margin:0;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};color:${escapeHtml(fg)};text-align:center;">
-          ${links}${links ? ` <span class="gn-footer" style="color:${escapeHtml(fg)};"> / </span> ` : ""}${unsub}
-        </p>
       </td>
     </tr>`;
 }
@@ -318,7 +497,6 @@ function interactiveChrome(): string {
           clearTimer = null;
         }
         if (selected) selected.classList.remove("gn-selected");
-        // Retrigger animation even when re-clicking the same block.
         void el.offsetWidth;
         selected = el;
         el.classList.add("gn-selected");
@@ -401,9 +579,8 @@ export function buildNewsletterHtml(
         <!--[if mso]>
         <table role="presentation" width="${w}" cellspacing="0" cellpadding="0" border="0"><tr><td>
         <![endif]-->
-        <table role="presentation" width="${w}" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:${w}px;background:${escapeHtml(c.backgroundCard)};border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">
+        <table role="presentation" class="gn-shell" width="${w}" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:${w}px;background:${escapeHtml(c.backgroundCard)};border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">
           ${body}
-          ${footerHtml(draft, abs, interactive)}
         </table>
         <!--[if mso]>
         </td></tr></table>

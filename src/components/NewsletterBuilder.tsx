@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   BodyBlock,
+  BlockSpacing,
   NewsletterColors,
   NewsletterDraft,
   NewsletterTypography,
@@ -12,9 +13,15 @@ import type {
 } from "@/lib/types";
 import {
   defaultSpacing,
+  DEFAULT_FRAMED_BORDER,
+  DEFAULT_FRAMED_BOX_HEIGHT,
+  DEFAULT_FRAMED_BOX_WIDTH,
   EMAIL_MOBILE_BREAKPOINT,
+  EMAIL_MOBILE_WIDTH,
+  resolveImageFullBleed,
   resolveMobileSpacing,
   resolveMobileTypography,
+  resolveSpacing,
 } from "@/lib/types";
 import { buildNewsletterHtml } from "@/lib/email-template";
 import {
@@ -29,7 +36,6 @@ import { ParagraphEditor } from "@/components/ParagraphEditor";
 
 type PreviewMode = "desktop" | "mobile";
 
-const MOBILE_PREVIEW_WIDTH = 390;
 /** Wait after last edit before writing localStorage — avoids thrashing while typing. */
 const AUTOSAVE_MS = 700;
 
@@ -105,13 +111,17 @@ export function NewsletterBuilder() {
   }, [ready]);
 
   useEffect(() => {
-    const assetBase =
+    // Copy / Brevo HTML may use the public Pages URL so emails resolve images.
+    // Preview must use the current origin so freshly materialized /assets/*
+    // files load from local `public/` before they are deployed.
+    const exportBase =
       process.env.NEXT_PUBLIC_ASSET_BASE_URL?.replace(/\/$/, "") ||
       resolveAssetBaseUrl();
-    setHtml(buildNewsletterHtml(draft, { absoluteBaseUrl: assetBase }));
+    const previewBase = resolveAssetBaseUrl();
+    setHtml(buildNewsletterHtml(draft, { absoluteBaseUrl: exportBase }));
     setPreviewHtml(
       buildNewsletterHtml(draft, {
-        absoluteBaseUrl: assetBase,
+        absoluteBaseUrl: previewBase,
         interactive: true,
       }),
     );
@@ -126,9 +136,7 @@ export function NewsletterBuilder() {
       const editorId =
         typeof data.blockId === "string"
           ? `editor-block-${data.blockId}`
-          : data.target === "footer"
-            ? "editor-footer"
-            : null;
+          : null;
       if (!editorId) return;
       setSelectedEditorId(editorId);
       if (selectClearTimerRef.current != null) {
@@ -192,6 +200,31 @@ export function NewsletterBuilder() {
     }));
   }
 
+  /** Read effective block padding for the current preview mode. */
+  function blockPad(block: BodyBlock): BlockSpacing {
+    const tokens =
+      previewMode === "mobile"
+        ? resolveMobileSpacing(draft)
+        : draft.spacing;
+    return resolveSpacing(
+      block,
+      tokens,
+      previewMode === "mobile" ? "mobile" : "desktop",
+    );
+  }
+
+  function setBlockPad(
+    sectionId: string,
+    blockId: string,
+    spacing: BlockSpacing,
+  ) {
+    if (previewMode === "mobile") {
+      updateBlock(sectionId, blockId, { mobileSpacing: spacing });
+    } else {
+      updateBlock(sectionId, blockId, { spacing });
+    }
+  }
+
   function addSection() {
     setDraft((prev) => ({
       ...prev,
@@ -233,6 +266,7 @@ export function NewsletterBuilder() {
   }
 
   function addBlock(sectionId: string, type: BodyBlock["type"]) {
+    const pad = draft.spacing.padX;
     const block: BodyBlock =
       type === "image"
         ? {
@@ -257,7 +291,9 @@ export function NewsletterBuilder() {
                 id: newId(),
                 type: "framedTitle",
                 html: "<p>Title</p>",
-                width: 2,
+                borderWidth: DEFAULT_FRAMED_BORDER,
+                boxWidth: DEFAULT_FRAMED_BOX_WIDTH,
+                boxHeight: DEFAULT_FRAMED_BOX_HEIGHT,
               }
             : type === "divider"
               ? {
@@ -266,14 +302,51 @@ export function NewsletterBuilder() {
                   spacing: {
                     top: draft.spacing.divider,
                     bottom: draft.spacing.divider,
+                    left: pad,
+                    right: pad,
                   },
                 }
-              : {
-                  id: newId(),
-                  type: "text",
-                  html: "<p></p>",
-                  align: "left",
-                };
+              : type === "tagline"
+                ? {
+                    id: newId(),
+                    type: "tagline",
+                    text: "gemeenschap voor reflectie en actie",
+                    spacing: {
+                      top: 24,
+                      bottom: 8,
+                      left: pad,
+                      right: pad,
+                    },
+                  }
+                : type === "footerBar"
+                  ? {
+                      id: newId(),
+                      type: "footerBar",
+                      note: "Je ontvangt deze mail omdat je deel uitmaakt van de Goe Nieuws community.",
+                      links: [
+                        {
+                          label: "Instagram",
+                          href: "https://www.instagram.com/goe.nieuws/",
+                        },
+                        {
+                          label: "Website",
+                          href: "https://goenieuws.be/",
+                        },
+                      ],
+                      dark: true,
+                      spacing: {
+                        top: 28,
+                        bottom: 28,
+                        left: pad,
+                        right: pad,
+                      },
+                    }
+                  : {
+                      id: newId(),
+                      type: "text",
+                      html: "<p></p>",
+                      align: "left",
+                    };
 
     setDraft((prev) => ({
       ...prev,
@@ -355,6 +428,40 @@ export function NewsletterBuilder() {
       setDraft((prev) => ({
         ...prev,
         mobileSpacing: undefined,
+        sections: prev.sections.map((section) => ({
+          ...section,
+          blocks: section.blocks.map((block) => {
+            const next = { ...block } as BodyBlock;
+            let changed = false;
+            if (next.mobileSpacing) {
+              delete next.mobileSpacing;
+              changed = true;
+            }
+            if (next.type === "image" && next.mobileWidth != null) {
+              delete next.mobileWidth;
+              changed = true;
+            }
+            if (next.type === "image" && next.mobileFullBleed != null) {
+              delete next.mobileFullBleed;
+              changed = true;
+            }
+            if (next.type === "framedTitle") {
+              if (next.mobileBoxWidth != null) {
+                delete next.mobileBoxWidth;
+                changed = true;
+              }
+              if (next.mobileBoxHeight != null) {
+                delete next.mobileBoxHeight;
+                changed = true;
+              }
+              if (next.mobileBorderWidth != null) {
+                delete next.mobileBorderWidth;
+                changed = true;
+              }
+            }
+            return changed ? next : block;
+          }),
+        })),
       }));
       return;
     }
@@ -403,7 +510,6 @@ export function NewsletterBuilder() {
   function countDataUrlImages(d: NewsletterDraft): number {
     let n = 0;
     if (d.dividerSrc?.startsWith("data:")) n += 1;
-    if (d.footer.logoSrc?.startsWith("data:")) n += 1;
     for (const section of d.sections) {
       for (const block of section.blocks) {
         if (block.type === "image" && block.src.startsWith("data:")) n += 1;
@@ -527,7 +633,7 @@ export function NewsletterBuilder() {
   // CSS does not apply; mobile iframe is phone-width so it does.
   const previewWidth =
     previewMode === "mobile"
-      ? MOBILE_PREVIEW_WIDTH
+      ? EMAIL_MOBILE_WIDTH
       : Math.max(
           draft.spacing.emailWidth + 64,
           EMAIL_MOBILE_BREAKPOINT + 40,
@@ -706,7 +812,9 @@ export function NewsletterBuilder() {
                               ? "Dots"
                               : block.type === "framedTitle"
                                 ? "Framed"
-                                : block.type}
+                                : block.type === "footerBar"
+                                  ? "Footer bar"
+                                  : block.type}
                             <span className="text-[var(--separator-strong)]">
                               {" "}
                               · {bIndex + 1}
@@ -758,12 +866,9 @@ export function NewsletterBuilder() {
                               }
                             />
                             <SpacingFields
-                              top={block.spacing?.top ?? 0}
-                              bottom={
-                                block.spacing?.bottom ?? draft.spacing.text
-                              }
+                              {...blockPad(block)}
                               onChange={(spacing) =>
-                                updateBlock(section.id, block.id, { spacing })
+                                setBlockPad(section.id, block.id, spacing)
                               }
                             />
                           </div>
@@ -781,6 +886,7 @@ export function NewsletterBuilder() {
                               <span className="min-w-0">
                                 <span className="block text-[13px] font-medium">
                                   Full bleed
+                                  {previewMode === "mobile" ? " · Mobile" : ""}
                                 </span>
                                 <span className="block text-[11px] text-[var(--text-tertiary)]">
                                   Edge-to-edge — ignores width and side padding
@@ -789,14 +895,23 @@ export function NewsletterBuilder() {
                               <span className="relative inline-flex h-[22px] w-[38px] shrink-0 items-center">
                                 <input
                                   type="checkbox"
-                                  checked={Boolean(block.fullBleed)}
+                                  checked={resolveImageFullBleed(
+                                    block,
+                                    previewMode === "mobile"
+                                      ? "mobile"
+                                      : "desktop",
+                                  )}
                                   onChange={(e) => {
                                     const on = e.target.checked;
-                                    updateBlock(section.id, block.id, {
-                                      fullBleed: on,
-                                      // Drop inset spacing so it can’t linger in the draft
-                                      ...(on ? { spacing: undefined } : {}),
-                                    });
+                                    if (previewMode === "mobile") {
+                                      updateBlock(section.id, block.id, {
+                                        mobileFullBleed: on,
+                                      });
+                                    } else {
+                                      updateBlock(section.id, block.id, {
+                                        fullBleed: on,
+                                      });
+                                    }
                                   }}
                                   className="peer sr-only"
                                 />
@@ -818,38 +933,60 @@ export function NewsletterBuilder() {
                                 updateBlock(section.id, block.id, { src: v })
                               }
                             />
-                            {!block.fullBleed ? (
+                            {!resolveImageFullBleed(
+                              block,
+                              previewMode === "mobile" ? "mobile" : "desktop",
+                            ) ? (
                               <>
                                 <NumberField
                                   label="Width"
                                   value={
-                                    block.width ?? draft.spacing.imageWidth
+                                    previewMode === "mobile"
+                                      ? (block.mobileWidth ??
+                                        block.width ??
+                                        displaySpacing.imageWidth)
+                                      : (block.width ??
+                                        draft.spacing.imageWidth)
                                   }
                                   onChange={(v) =>
-                                    updateBlock(section.id, block.id, {
-                                      width: v,
-                                    })
+                                    updateBlock(
+                                      section.id,
+                                      block.id,
+                                      previewMode === "mobile"
+                                        ? { mobileWidth: v }
+                                        : { width: v },
+                                    )
                                   }
                                 />
                                 <p className="text-[11px] text-[var(--text-tertiary)]">
-                                  Side inset = (email width − image width) / 2
+                                  Use Left / Right for horizontal inset
                                 </p>
                                 <SpacingFields
-                                  top={
-                                    block.spacing?.top ?? draft.spacing.image
-                                  }
-                                  bottom={
-                                    block.spacing?.bottom ??
-                                    draft.spacing.image
-                                  }
+                                  {...blockPad(block)}
                                   onChange={(spacing) =>
-                                    updateBlock(section.id, block.id, {
-                                      spacing,
+                                    setBlockPad(section.id, block.id, spacing)
+                                  }
+                                />
+                              </>
+                            ) : (
+                              <>
+                                <p className="text-[11px] text-[var(--text-tertiary)]">
+                                  Edge-to-edge horizontally — Top / Bottom still
+                                  apply
+                                </p>
+                                <SpacingFields
+                                  {...blockPad(block)}
+                                  verticalOnly
+                                  onChange={(spacing) =>
+                                    setBlockPad(section.id, block.id, {
+                                      ...spacing,
+                                      left: 0,
+                                      right: 0,
                                     })
                                   }
                                 />
                               </>
-                            ) : null}
+                            )}
                           </div>
                         )}
 
@@ -872,12 +1009,9 @@ export function NewsletterBuilder() {
                               }
                             />
                             <SpacingFields
-                              top={block.spacing?.top ?? 0}
-                              bottom={
-                                block.spacing?.bottom ?? draft.spacing.text
-                              }
+                              {...blockPad(block)}
                               onChange={(spacing) =>
-                                updateBlock(section.id, block.id, { spacing })
+                                setBlockPad(section.id, block.id, spacing)
                               }
                             />
                           </div>
@@ -895,33 +1029,77 @@ export function NewsletterBuilder() {
                               compact
                               placeholder="Framed title…"
                             />
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-3 gap-2">
                               <NumberField
-                                label="Width"
-                                value={block.width ?? 2}
+                                label="Box W"
+                                value={
+                                  previewMode === "mobile"
+                                    ? (block.mobileBoxWidth ??
+                                      block.boxWidth ??
+                                      DEFAULT_FRAMED_BOX_WIDTH)
+                                    : (block.boxWidth ??
+                                      DEFAULT_FRAMED_BOX_WIDTH)
+                                }
                                 onChange={(v) =>
-                                  updateBlock(section.id, block.id, {
-                                    width: v,
-                                  })
+                                  updateBlock(
+                                    section.id,
+                                    block.id,
+                                    previewMode === "mobile"
+                                      ? { mobileBoxWidth: v }
+                                      : { boxWidth: v },
+                                  )
                                 }
                               />
                               <NumberField
-                                label="Height"
-                                value={block.height ?? 0}
+                                label="Box H"
+                                value={
+                                  previewMode === "mobile"
+                                    ? (block.mobileBoxHeight ??
+                                      block.boxHeight ??
+                                      DEFAULT_FRAMED_BOX_HEIGHT)
+                                    : (block.boxHeight ??
+                                      DEFAULT_FRAMED_BOX_HEIGHT)
+                                }
                                 onChange={(v) =>
-                                  updateBlock(section.id, block.id, {
-                                    height: v > 0 ? v : undefined,
-                                  })
+                                  updateBlock(
+                                    section.id,
+                                    block.id,
+                                    previewMode === "mobile"
+                                      ? { mobileBoxHeight: v }
+                                      : { boxHeight: v },
+                                  )
+                                }
+                              />
+                              <NumberField
+                                label="Border"
+                                value={
+                                  previewMode === "mobile"
+                                    ? (block.mobileBorderWidth ??
+                                      block.borderWidth ??
+                                      block.width ??
+                                      DEFAULT_FRAMED_BORDER)
+                                    : (block.borderWidth ??
+                                      block.width ??
+                                      DEFAULT_FRAMED_BORDER)
+                                }
+                                onChange={(v) =>
+                                  updateBlock(
+                                    section.id,
+                                    block.id,
+                                    previewMode === "mobile"
+                                      ? { mobileBorderWidth: v }
+                                      : { borderWidth: v },
+                                  )
                                 }
                               />
                             </div>
+                            <p className="text-[11px] text-[var(--text-tertiary)]">
+                              Fixed px size — does not scale with the viewport
+                            </p>
                             <SpacingFields
-                              top={block.spacing?.top ?? 0}
-                              bottom={
-                                block.spacing?.bottom ?? draft.spacing.text
-                              }
+                              {...blockPad(block)}
                               onChange={(spacing) =>
-                                updateBlock(section.id, block.id, { spacing })
+                                setBlockPad(section.id, block.id, spacing)
                               }
                             />
                           </div>
@@ -930,14 +1108,68 @@ export function NewsletterBuilder() {
                         {block.type === "divider" && (
                           <div className="space-y-2.5">
                             <SpacingFields
-                              top={
-                                block.spacing?.top ?? draft.spacing.divider
-                              }
-                              bottom={
-                                block.spacing?.bottom ?? draft.spacing.divider
-                              }
+                              {...blockPad(block)}
                               onChange={(spacing) =>
-                                updateBlock(section.id, block.id, { spacing })
+                                setBlockPad(section.id, block.id, spacing)
+                              }
+                            />
+                          </div>
+                        )}
+
+                        {block.type === "tagline" && (
+                          <div className="space-y-2.5">
+                            <Field
+                              label="Tagline"
+                              value={block.text}
+                              onChange={(v) =>
+                                updateBlock(section.id, block.id, {
+                                  text: v,
+                                })
+                              }
+                            />
+                            <SpacingFields
+                              {...blockPad(block)}
+                              onChange={(spacing) =>
+                                setBlockPad(section.id, block.id, spacing)
+                              }
+                            />
+                          </div>
+                        )}
+
+                        {block.type === "footerBar" && (
+                          <div className="space-y-2.5">
+                            <label className="flex cursor-pointer items-center justify-between gap-3 rounded-[var(--radius-sm)] bg-[var(--fill)] px-3 py-2.5">
+                              <span className="text-[13px] font-medium">
+                                Dark bar
+                              </span>
+                              <span className="relative inline-flex h-[22px] w-[38px] shrink-0 items-center">
+                                <input
+                                  type="checkbox"
+                                  checked={block.dark !== false}
+                                  onChange={(e) =>
+                                    updateBlock(section.id, block.id, {
+                                      dark: e.target.checked,
+                                    })
+                                  }
+                                  className="peer sr-only"
+                                />
+                                <span className="absolute inset-0 rounded-full bg-[#e9e9eb] transition-colors peer-checked:bg-[var(--accent)]" />
+                                <span className="absolute left-[2px] size-[18px] rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-[16px]" />
+                              </span>
+                            </label>
+                            <Field
+                              label="Note"
+                              value={block.note}
+                              onChange={(v) =>
+                                updateBlock(section.id, block.id, {
+                                  note: v,
+                                })
+                              }
+                            />
+                            <SpacingFields
+                              {...blockPad(block)}
+                              onChange={(spacing) =>
+                                setBlockPad(section.id, block.id, spacing)
                               }
                             />
                           </div>
@@ -954,6 +1186,8 @@ export function NewsletterBuilder() {
                         ["meta", "Meta"],
                         ["framedTitle", "Framed"],
                         ["divider", "Dots"],
+                        ["tagline", "Tagline"],
+                        ["footerBar", "Footer"],
                       ] as const
                     ).map(([type, label]) => (
                       <button
@@ -968,114 +1202,6 @@ export function NewsletterBuilder() {
                   </div>
                 </div>
               ))}
-          </div>
-
-          <div
-            id="editor-footer"
-            className={`rounded-[var(--radius)] outline outline-2 outline-offset-[-1px] transition-[outline-color] duration-300 ${
-              selectedEditorId === "editor-footer"
-                ? "outline-[var(--accent)]"
-                : "outline-transparent"
-            }`}
-          >
-          <Panel title="Footer">
-            <label className="mb-3 flex cursor-pointer items-center justify-between gap-3 rounded-[var(--radius-sm)] bg-[var(--fill)] px-3 py-2.5">
-              <span className="text-[13px] font-medium">Dark bar</span>
-              <span className="relative inline-flex h-[22px] w-[38px] shrink-0 items-center">
-                <input
-                  type="checkbox"
-                  checked={draft.footer.dark}
-                  onChange={(e) =>
-                    setDraft((p) => ({
-                      ...p,
-                      footer: { ...p.footer, dark: e.target.checked },
-                    }))
-                  }
-                  className="peer sr-only"
-                />
-                <span className="absolute inset-0 rounded-full bg-[#e9e9eb] transition-colors peer-checked:bg-[var(--accent)]" />
-                <span className="absolute left-[2px] size-[18px] rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-[16px]" />
-              </span>
-            </label>
-            <div className="mb-3 space-y-2">
-              <span className="block text-[11px] font-medium text-[var(--text-tertiary)]">
-                Logo
-              </span>
-              <ImageDropzone
-                src={draft.footer.logoSrc ?? ""}
-                onChange={(src) =>
-                  setDraft((p) => ({
-                    ...p,
-                    footer: {
-                      ...p.footer,
-                      logoSrc: src || undefined,
-                    },
-                  }))
-                }
-              />
-              <div className="flex flex-wrap gap-1">
-                {(
-                  [
-                    ["/assets/logo-goe.png", "Goe"],
-                    ["/assets/logo-gn.png", "GN"],
-                  ] as const
-                ).map(([src, label]) => (
-                  <button
-                    key={src}
-                    type="button"
-                    onClick={() =>
-                      setDraft((p) => ({
-                        ...p,
-                        footer: { ...p.footer, logoSrc: src },
-                      }))
-                    }
-                    className={`rounded-md px-2 py-1 text-[11px] font-medium shadow-[var(--shadow-sm)] transition-colors ${
-                      draft.footer.logoSrc === src
-                        ? "bg-[var(--accent)] text-white"
-                        : "bg-[var(--fill)] text-[var(--text-secondary)] hover:text-[var(--foreground)]"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() =>
-                    setDraft((p) => ({
-                      ...p,
-                      footer: { ...p.footer, logoSrc: undefined },
-                    }))
-                  }
-                  className="rounded-md bg-[var(--fill)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition-colors hover:text-[var(--foreground)]"
-                >
-                  None
-                </button>
-              </div>
-              <Field
-                label="Logo URL"
-                value={draft.footer.logoSrc ?? ""}
-                onChange={(v) =>
-                  setDraft((p) => ({
-                    ...p,
-                    footer: {
-                      ...p.footer,
-                      logoSrc: v.trim() || undefined,
-                    },
-                  }))
-                }
-              />
-            </div>
-            <Field
-              label="Footer note"
-              value={draft.footer.note}
-              onChange={(v) =>
-                setDraft((p) => ({
-                  ...p,
-                  footer: { ...p.footer, note: v },
-                }))
-              }
-            />
-          </Panel>
           </div>
 
           <Panel
@@ -1102,6 +1228,16 @@ export function NewsletterBuilder() {
                 label="Divider gap"
                 value={displaySpacing.divider}
                 onChange={(v) => updateSpacing({ divider: v })}
+              />
+              <NumberField
+                label="Dot size"
+                value={displaySpacing.dotSize}
+                onChange={(v) => updateSpacing({ dotSize: v })}
+              />
+              <NumberField
+                label="Dot spacing"
+                value={displaySpacing.dotSpacing}
+                onChange={(v) => updateSpacing({ dotSpacing: v })}
               />
               <NumberField
                 label="Pad X"
@@ -1157,6 +1293,16 @@ export function NewsletterBuilder() {
                 label="Meta"
                 value={displayTypography.metaSize}
                 onChange={(v) => updateTypography({ metaSize: v })}
+              />
+              <NumberField
+                label="Tagline"
+                value={displayTypography.taglineSize}
+                onChange={(v) => updateTypography({ taglineSize: v })}
+              />
+              <NumberField
+                label="Credits"
+                value={displayTypography.footerSize}
+                onChange={(v) => updateTypography({ footerSize: v })}
               />
             </div>
             {previewMode === "mobile" ? (
@@ -1427,24 +1573,50 @@ function SegmentedControl<T extends string>({
 function SpacingFields({
   top,
   bottom,
+  left,
+  right,
   onChange,
+  verticalOnly = false,
 }: {
   top: number;
   bottom: number;
-  onChange: (spacing: { top: number; bottom: number }) => void;
+  left: number;
+  right: number;
+  onChange: (spacing: {
+    top: number;
+    bottom: number;
+    left: number;
+    right: number;
+  }) => void;
+  /** Full-bleed images — only top/bottom are editable. */
+  verticalOnly?: boolean;
 }) {
   return (
     <div className="grid grid-cols-2 gap-2">
       <NumberField
         label="Top"
         value={top}
-        onChange={(v) => onChange({ top: v, bottom })}
+        onChange={(v) => onChange({ top: v, bottom, left, right })}
       />
       <NumberField
         label="Bottom"
         value={bottom}
-        onChange={(v) => onChange({ top, bottom: v })}
+        onChange={(v) => onChange({ top, bottom: v, left, right })}
       />
+      {!verticalOnly ? (
+        <>
+          <NumberField
+            label="Left"
+            value={left}
+            onChange={(v) => onChange({ top, bottom, left: v, right })}
+          />
+          <NumberField
+            label="Right"
+            value={right}
+            onChange={(v) => onChange({ top, bottom, left, right: v })}
+          />
+        </>
+      ) : null}
     </div>
   );
 }

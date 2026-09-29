@@ -1,5 +1,16 @@
-import type { BodyBlock, NewsletterDraft, Section } from "@/lib/types";
-import { defaultSpacing } from "@/lib/types";
+import type {
+  BodyBlock,
+  FramedTitleBlock,
+  NewsletterDraft,
+  Section,
+} from "@/lib/types";
+import {
+  DEFAULT_FRAMED_BORDER,
+  DEFAULT_FRAMED_BOX_HEIGHT,
+  DEFAULT_FRAMED_BOX_WIDTH,
+  defaultSpacing,
+  emptyFooter,
+} from "@/lib/types";
 
 /** Bump when NewsletterDraft shape changes incompatibly. */
 const STORAGE_KEY = "goe-nieuws:draft:v1";
@@ -84,38 +95,133 @@ function isValidDraft(value: unknown): value is NewsletterDraft {
   return typeof draft.subject === "string" && Array.isArray(draft.sections);
 }
 
-/** Turn legacy `dividerAfter` flags into real divider blocks; ensure dividerSrc. */
+function newId(prefix: string): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${prefix}-${Date.now()}`;
+}
+
+function migrateFramedTitle(block: FramedTitleBlock): FramedTitleBlock {
+  const borderWidth =
+    block.borderWidth ?? block.width ?? DEFAULT_FRAMED_BORDER;
+  const boxWidth = block.boxWidth ?? DEFAULT_FRAMED_BOX_WIDTH;
+  const boxHeight =
+    block.boxHeight ?? block.height ?? DEFAULT_FRAMED_BOX_HEIGHT;
+  const { width: _w, height: _h, ...rest } = block;
+  return {
+    ...rest,
+    borderWidth,
+    boxWidth,
+    boxHeight,
+  };
+}
+
+/** Turn legacy dividerAfter / footer blob / framed width into current shape. */
 function migrateDraft(draft: NewsletterDraft): NewsletterDraft {
   const dividerGap = draft.spacing?.divider ?? defaultSpacing.divider;
-  let next: NewsletterDraft = draft.dividerSrc
-    ? draft
-    : { ...draft, dividerSrc: "/assets/divider-dots.png" };
+  let next: NewsletterDraft = {
+    ...draft,
+    dividerSrc: draft.dividerSrc || "/assets/divider-dots.png",
+    spacing: { ...defaultSpacing, ...draft.spacing },
+  };
 
   const sections: Section[] = next.sections.map((section) => {
-    if (!section.dividerAfter) {
-      if (section.dividerAfter === false) {
-        const { dividerAfter: _, ...rest } = section;
-        return rest;
+    let blocks = section.blocks.map((block) => {
+      if (block.type === "framedTitle") return migrateFramedTitle(block);
+      // Old Figma insets → inherit global padX like text
+      if (
+        block.type === "divider" &&
+        block.spacing?.left === 19 &&
+        block.spacing?.right === 19
+      ) {
+        const { left: _l, right: _r, ...rest } = block.spacing;
+        return { ...block, spacing: rest };
       }
-      return section;
+      if (
+        block.type === "tagline" &&
+        block.spacing?.left === 9 &&
+        block.spacing?.right === 9
+      ) {
+        const { left: _l, right: _r, ...rest } = block.spacing;
+        return { ...block, spacing: rest };
+      }
+      return block;
+    });
+
+    if (section.dividerAfter) {
+      const alreadyHasDivider = blocks.some((b) => b.type === "divider");
+      if (!alreadyHasDivider) {
+        const divider: BodyBlock = {
+          id: newId(`div-${section.id}`),
+          type: "divider",
+          spacing: { top: dividerGap, bottom: dividerGap },
+        };
+        blocks = [...blocks, divider];
+      }
     }
-    const { dividerAfter: _, ...rest } = section;
-    const alreadyHasDivider = section.blocks.some((b) => b.type === "divider");
-    if (alreadyHasDivider) return rest;
-    const divider: BodyBlock = {
-      id:
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `div-${section.id}`,
-      type: "divider",
-      spacing: { top: dividerGap, bottom: dividerGap },
-    };
-    return { ...rest, blocks: [...section.blocks, divider] };
+
+    if (section.dividerAfter === true || section.dividerAfter === false) {
+      const { dividerAfter: _, ...rest } = section;
+      return { ...rest, blocks };
+    }
+    return { ...section, blocks };
   });
 
-  const sectionsChanged = sections.some((s, i) => s !== next.sections[i]);
-  if (sectionsChanged || next !== draft) {
-    return { ...next, sections };
+  next = { ...next, sections };
+
+  const hasFooterBlocks = next.sections.some((s) =>
+    s.blocks.some((b) => b.type === "tagline" || b.type === "footerBar"),
+  );
+  const legacy = next.footer;
+  const needsFooterMigrate =
+    !hasFooterBlocks &&
+    Boolean(
+      legacy?.tagline ||
+        legacy?.logoSrc ||
+        legacy?.note ||
+        (legacy?.links && legacy.links.length),
+    );
+
+  if (needsFooterMigrate && legacy) {
+    const footerBlocks: BodyBlock[] = [];
+    if (legacy.tagline) {
+      footerBlocks.push({
+        id: newId("tagline"),
+        type: "tagline",
+        text: legacy.tagline,
+        spacing: { top: 24, bottom: 8 },
+      });
+    }
+    if (legacy.logoSrc) {
+      footerBlocks.push({
+        id: newId("footer-logo"),
+        type: "image",
+        src: legacy.logoSrc,
+        alt: "Goe Nieuws",
+        width: 423,
+        spacing: { top: 0, bottom: 16, left: 17, right: 17 },
+      });
+    }
+    footerBlocks.push({
+      id: newId("footer-bar"),
+      type: "footerBar",
+      note: legacy.note || "",
+      links: legacy.links ?? [],
+      dark: legacy.dark !== false,
+      spacing: { top: 28, bottom: 28 },
+    });
+    next = {
+      ...next,
+      sections: [
+        ...next.sections,
+        { id: newId("sec-footer"), font: "sans", blocks: footerBlocks },
+      ],
+      footer: emptyFooter,
+    };
+  } else if (!next.footer) {
+    next = { ...next, footer: emptyFooter };
   }
+
   return next;
 }

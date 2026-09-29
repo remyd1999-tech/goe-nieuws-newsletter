@@ -3,6 +3,7 @@ import {
   defaultColors,
   defaultSpacing,
   defaultTypography,
+  emptyFooter,
 } from "./types";
 
 /**
@@ -160,6 +161,9 @@ export const sampleDraft: NewsletterDraft = {
           id: "a-title",
           type: "framedTitle",
           html: "<p>Anatomie van aanraking</p>",
+          borderWidth: 2,
+          boxWidth: 402,
+          boxHeight: 52,
           // photo end 3952 → title 4105 ≈ 153 (Figma), tighten slightly for empty rect
           spacing: { top: 40, bottom: 24 },
         },
@@ -275,19 +279,43 @@ export const sampleDraft: NewsletterDraft = {
         },
       ],
     },
+    {
+      id: "sec-footer",
+      font: "sans",
+      blocks: [
+        {
+          id: "tagline",
+          type: "tagline",
+          text: "gemeenschap voor reflectie en actie — community for reflection and action",
+          spacing: { top: 24, bottom: 8 },
+        },
+        {
+          id: "footer-logo",
+          type: "image",
+          src: "/assets/logo-goe.png",
+          alt: "Goe Nieuws",
+          width: 423,
+          spacing: { top: 0, bottom: 16, left: 17, right: 17 },
+        },
+        {
+          id: "footer-bar",
+          type: "footerBar",
+          dark: true,
+          note: "Je ontvangt deze mail omdat je deel uitmaakt van de Goe Nieuws community.",
+          links: [
+            {
+              label: "Instagram",
+              href: "https://www.instagram.com/goe.nieuws/",
+            },
+            { label: "Facebook", href: "https://www.facebook.com/" },
+            { label: "Website", href: "https://goenieuws.be/" },
+          ],
+          spacing: { top: 28, bottom: 28, left: 28, right: 28 },
+        },
+      ],
+    },
   ],
-  footer: {
-    dark: true,
-    tagline:
-      "gemeenschap voor reflectie en actie — community for reflection and action",
-    logoSrc: "/assets/logo-goe.png",
-    note: "Je ontvangt deze mail omdat je deel uitmaakt van de Goe Nieuws community.",
-    links: [
-      { label: "Instagram", href: "https://www.instagram.com/goe.nieuws/" },
-      { label: "Facebook", href: "https://www.facebook.com/" },
-      { label: "Website", href: "https://goenieuws.be/" },
-    ],
-  },
+  footer: emptyFooter,
   colors: defaultColors,
   spacing: defaultSpacing,
   typography: defaultTypography,

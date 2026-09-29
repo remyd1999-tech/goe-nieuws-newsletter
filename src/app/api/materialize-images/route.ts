@@ -91,10 +91,6 @@ function rewriteDraft(
   return {
     ...draft,
     dividerSrc: replace(draft.dividerSrc) ?? draft.dividerSrc,
-    footer: {
-      ...draft.footer,
-      logoSrc: replace(draft.footer.logoSrc),
-    },
     sections: draft.sections.map((section) => ({
       ...section,
       blocks: section.blocks.map((block) => {
