@@ -2,6 +2,7 @@ import type {
   BodyBlock,
   DividerBlock,
   FooterBarBlock,
+  FrameBorder,
   NewsletterDraft,
   Section,
   SectionFont,
@@ -11,6 +12,7 @@ import type {
 import {
   EMAIL_MOBILE_BREAKPOINT,
   EMAIL_MOBILE_WIDTH,
+  resolveFrameBorder,
   resolveFramedTitle,
   resolveImageFullBleed,
   resolveMobileSpacing,
@@ -31,6 +33,21 @@ function escapeHtml(value: string): string {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+/** Per-side border CSS from shared color + width. */
+function frameBorderCss(border: FrameBorder, important = false): string {
+  const w = Math.max(0, Math.round(border.width));
+  const c = escapeHtml(border.color);
+  const bang = important ? " !important" : "";
+  const side = (on: boolean) =>
+    on && w > 0 ? `${w}px solid ${c}${bang}` : `none${bang}`;
+  return [
+    `border-top:${side(border.top)}`,
+    `border-right:${side(border.right)}`,
+    `border-bottom:${side(border.bottom)}`,
+    `border-left:${side(border.left)}`,
+  ].join(";");
 }
 
 function fontStack(font: SectionFont): string {
@@ -130,6 +147,7 @@ function mobileBlockRules(draft: NewsletterDraft): string {
 function mobileStyleBlock(draft: NewsletterDraft): string {
   const t = resolveMobileTypography(draft);
   const s = resolveMobileSpacing(draft);
+  const frame = resolveFrameBorder(draft, "mobile");
   const bp = EMAIL_MOBILE_BREAKPOINT;
   const perBlock = mobileBlockRules(draft);
   const mobDot = Math.max(1, Math.round(s.dotSize ?? 3));
@@ -163,6 +181,7 @@ function mobileStyleBlock(draft: NewsletterDraft): string {
       .gn-shell {
         width: 100% !important;
         max-width: 100% !important;
+        ${frameBorderCss(frame, true)}
       }
       .gn-shell td {
         word-break: break-word !important;
@@ -318,16 +337,18 @@ function footerBarBlockHtml(
   const fg = dark ? c.footerText : c.body;
   const marker = blockMarker(block.id, interactive);
 
+  const sep = ` <span class="gn-footer" style="color:${escapeHtml(fg)};font-family:${FONT_SERIF};font-size:${t.footerSize}px;"> / </span> `;
   const links = block.links
-    .map(
-      (l) =>
-        `<a href="${escapeHtml(l.href)}" class="gn-footer" style="color:${escapeHtml(fg)};text-decoration:underline;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};">${escapeHtml(l.label)}</a>`,
-    )
-    .join(
-      ` <span class="gn-footer" style="color:${escapeHtml(fg)};font-family:${FONT_SERIF};font-size:${t.footerSize}px;"> / </span> `,
-    );
-
-  const unsub = `<a href="{{ unsubscribe }}" class="gn-footer" style="color:${escapeHtml(fg)};text-decoration:underline;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};">Unsubscribe</a>`;
+    .filter((l) => l.label.trim())
+    .map((l) => {
+      const label = escapeHtml(l.label);
+      const style = `color:${escapeHtml(fg)};text-decoration:underline;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};`;
+      if (!l.href.trim()) {
+        return `<span class="gn-footer" style="${style}">${label}</span>`;
+      }
+      return `<a href="${escapeHtml(l.href)}" class="gn-footer" style="${style}">${label}</a>`;
+    })
+    .join(sep);
 
   return `
     <tr${marker}>
@@ -335,9 +356,13 @@ function footerBarBlockHtml(
         <p class="gn-footer" style="margin:0 0 8px 0;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};color:${escapeHtml(fg)};text-align:center;">
           ${escapeHtml(block.note)}
         </p>
-        <p class="gn-footer" style="margin:0;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};color:${escapeHtml(fg)};text-align:center;">
-          ${links}${links ? ` <span class="gn-footer" style="color:${escapeHtml(fg)};"> / </span> ` : ""}${unsub}
-        </p>
+        ${
+          links
+            ? `<p class="gn-footer" style="margin:0;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};color:${escapeHtml(fg)};text-align:center;">
+          ${links}
+        </p>`
+            : ""
+        }
       </td>
     </tr>`;
 }
@@ -540,6 +565,8 @@ export function buildNewsletterHtml(
 
   const c = draft.colors;
   const w = draft.spacing.emailWidth;
+  const frame = resolveFrameBorder(draft, "desktop");
+  const frameCss = frameBorderCss(frame);
   const titlePlain = draft.subject || "Goe Nieuws";
 
   const body = draft.sections
@@ -579,7 +606,7 @@ export function buildNewsletterHtml(
         <!--[if mso]>
         <table role="presentation" width="${w}" cellspacing="0" cellpadding="0" border="0"><tr><td>
         <![endif]-->
-        <table role="presentation" class="gn-shell" width="${w}" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:${w}px;background:${escapeHtml(c.backgroundCard)};border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">
+        <table role="presentation" class="gn-shell" width="${w}" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:${w}px;background:${escapeHtml(c.backgroundCard)};border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;${frameCss}">
           ${body}
         </table>
         <!--[if mso]>

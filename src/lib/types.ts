@@ -142,6 +142,17 @@ export type NewsletterColors = {
   footerText: string;
 };
 
+/** Outline around the email shell (same color + width; sides optional). */
+export type FrameBorder = {
+  color: string;
+  /** Thickness in px (shared by all enabled sides). */
+  width: number;
+  top: boolean;
+  right: boolean;
+  bottom: boolean;
+  left: boolean;
+};
+
 export type SpacingTokens = {
   /** Default gap under text blocks (= one Georgia empty line ≈ 23px) */
   text: number;
@@ -200,12 +211,19 @@ export type NewsletterDraft = {
   colors: NewsletterColors;
   spacing: SpacingTokens;
   typography: NewsletterTypography;
+  /** Desktop outline around the email frame. */
+  frameBorder: FrameBorder;
   /**
    * Optional mobile overrides (merged over desktop).
    * Empty / omitted keys inherit desktop — only diverge when edited.
    */
   mobileSpacing?: Partial<SpacingTokens>;
   mobileTypography?: Partial<NewsletterTypography>;
+  /**
+   * Mobile frame border. When omitted, mobile has no outline (full-bleed).
+   * Set explicitly to enable / diverge from desktop.
+   */
+  mobileFrameBorder?: Partial<FrameBorder>;
   /**
    * @deprecated Dividers are rendered as HTML dots (`colors.divider`).
    * Kept so older drafts still load.
@@ -231,6 +249,34 @@ export function resolveMobileTypography(
   draft: NewsletterDraft,
 ): NewsletterTypography {
   return { ...draft.typography, ...draft.mobileTypography };
+}
+
+export const defaultFrameBorder: FrameBorder = {
+  color: "#000000",
+  width: 2,
+  top: false,
+  right: false,
+  bottom: false,
+  left: false,
+};
+
+export function resolveFrameBorder(
+  draft: NewsletterDraft,
+  mode: "desktop" | "mobile" = "desktop",
+): FrameBorder {
+  const desktop = { ...defaultFrameBorder, ...draft.frameBorder };
+  if (mode === "desktop") return desktop;
+  // No mobile config → full-bleed (no outline), keep color/width for when sides are enabled.
+  if (!draft.mobileFrameBorder) {
+    return {
+      ...desktop,
+      top: false,
+      right: false,
+      bottom: false,
+      left: false,
+    };
+  }
+  return { ...desktop, ...draft.mobileFrameBorder };
 }
 
 export type BrevoSendPayload = {

@@ -1,6 +1,7 @@
 import type { NewsletterDraft } from "./types";
 import {
   defaultColors,
+  defaultFrameBorder,
   defaultSpacing,
   defaultTypography,
   emptyFooter,
@@ -307,8 +308,7 @@ export const sampleDraft: NewsletterDraft = {
               label: "Instagram",
               href: "https://www.instagram.com/goe.nieuws/",
             },
-            { label: "Facebook", href: "https://www.facebook.com/" },
-            { label: "Website", href: "https://goenieuws.be/" },
+            { label: "Unsubscribe", href: "" },
           ],
           spacing: { top: 28, bottom: 28, left: 28, right: 28 },
         },
@@ -317,6 +317,7 @@ export const sampleDraft: NewsletterDraft = {
   ],
   footer: emptyFooter,
   colors: defaultColors,
+  frameBorder: defaultFrameBorder,
   spacing: defaultSpacing,
   typography: defaultTypography,
 };

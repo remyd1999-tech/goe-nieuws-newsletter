@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   BodyBlock,
   BlockSpacing,
+  FrameBorder,
   NewsletterColors,
   NewsletterDraft,
   NewsletterTypography,
@@ -12,12 +13,14 @@ import type {
   SpacingTokens,
 } from "@/lib/types";
 import {
+  defaultFrameBorder,
   defaultSpacing,
   DEFAULT_FRAMED_BORDER,
   DEFAULT_FRAMED_BOX_HEIGHT,
   DEFAULT_FRAMED_BOX_WIDTH,
   EMAIL_MOBILE_BREAKPOINT,
   EMAIL_MOBILE_WIDTH,
+  resolveFrameBorder,
   resolveImageFullBleed,
   resolveMobileSpacing,
   resolveMobileTypography,
@@ -328,10 +331,7 @@ export function NewsletterBuilder() {
                           label: "Instagram",
                           href: "https://www.instagram.com/goe.nieuws/",
                         },
-                        {
-                          label: "Website",
-                          href: "https://goenieuws.be/",
-                        },
+                        { label: "Unsubscribe", href: "" },
                       ],
                       dark: true,
                       spacing: {
@@ -421,6 +421,39 @@ export function NewsletterBuilder() {
         typography: { ...prev.typography, ...patch },
       };
     });
+  }
+
+  function updateFrameBorder(patch: Partial<FrameBorder>) {
+    setDraft((prev) => {
+      if (previewMode === "mobile") {
+        return {
+          ...prev,
+          mobileFrameBorder: { ...prev.mobileFrameBorder, ...patch },
+        };
+      }
+      return {
+        ...prev,
+        frameBorder: {
+          ...defaultFrameBorder,
+          ...prev.frameBorder,
+          ...patch,
+        },
+      };
+    });
+  }
+
+  function resetFrameBorder() {
+    if (previewMode === "mobile") {
+      setDraft((prev) => ({
+        ...prev,
+        mobileFrameBorder: undefined,
+      }));
+      return;
+    }
+    setDraft((prev) => ({
+      ...prev,
+      frameBorder: defaultFrameBorder,
+    }));
   }
 
   function resetSpacing() {
@@ -628,6 +661,10 @@ export function NewsletterBuilder() {
     previewMode === "mobile"
       ? resolveMobileTypography(draft)
       : draft.typography;
+  const displayFrameBorder = resolveFrameBorder(
+    draft,
+    previewMode === "mobile" ? "mobile" : "desktop",
+  );
 
   // Desktop iframe must be wider than the email @media breakpoint so mobile
   // CSS does not apply; mobile iframe is phone-width so it does.
@@ -1166,6 +1203,35 @@ export function NewsletterBuilder() {
                                 })
                               }
                             />
+                            {block.links.map((link, i) => (
+                              <div key={i} className="space-y-2.5">
+                                <Field
+                                  label={`Link ${i + 1} · label`}
+                                  value={link.label}
+                                  onChange={(v) => {
+                                    const links = block.links.map((l, j) =>
+                                      j === i ? { ...l, label: v } : l,
+                                    );
+                                    updateBlock(section.id, block.id, {
+                                      links,
+                                    });
+                                  }}
+                                />
+                                <Field
+                                  label={`Link ${i + 1} · URL`}
+                                  value={link.href}
+                                  placeholder="https://…"
+                                  onChange={(v) => {
+                                    const links = block.links.map((l, j) =>
+                                      j === i ? { ...l, href: v } : l,
+                                    );
+                                    updateBlock(section.id, block.id, {
+                                      links,
+                                    });
+                                  }}
+                                />
+                              </div>
+                            ))}
                             <SpacingFields
                               {...blockPad(block)}
                               onChange={(spacing) =>
@@ -1336,6 +1402,65 @@ export function NewsletterBuilder() {
                 />
               ))}
             </div>
+          </Panel>
+
+          <Panel
+            title={
+              previewMode === "mobile" ? "Frame border · Mobile" : "Frame border"
+            }
+          >
+            <div className="space-y-2.5">
+              <div className="grid grid-cols-2 gap-2.5">
+                <ColorField
+                  label="Color"
+                  value={displayFrameBorder.color}
+                  onChange={(v) => updateFrameBorder({ color: v })}
+                />
+                <NumberField
+                  label="Width"
+                  value={displayFrameBorder.width}
+                  onChange={(v) => updateFrameBorder({ width: v })}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    ["top", "Top"],
+                    ["right", "Right"],
+                    ["bottom", "Bottom"],
+                    ["left", "Left"],
+                  ] as const
+                ).map(([side, label]) => (
+                  <label
+                    key={side}
+                    className="flex cursor-pointer items-center justify-between gap-3 rounded-[var(--radius-sm)] bg-[var(--fill)] px-3 py-2.5"
+                  >
+                    <span className="text-[13px] font-medium">{label}</span>
+                    <span className="relative inline-flex h-[22px] w-[38px] shrink-0 items-center">
+                      <input
+                        type="checkbox"
+                        checked={displayFrameBorder[side]}
+                        onChange={(e) =>
+                          updateFrameBorder({ [side]: e.target.checked })
+                        }
+                        className="peer sr-only"
+                      />
+                      <span className="absolute inset-0 rounded-full bg-[#e9e9eb] transition-colors peer-checked:bg-[var(--accent)]" />
+                      <span className="absolute left-[2px] size-[18px] rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-[16px]" />
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            {previewMode === "mobile" ? (
+              <button
+                type="button"
+                className="mt-3 text-[12px] font-medium text-[var(--accent)] transition-opacity hover:opacity-70"
+                onClick={resetFrameBorder}
+              >
+                Clear mobile (no border)
+              </button>
+            ) : null}
           </Panel>
 
           <Panel title="Brevo">

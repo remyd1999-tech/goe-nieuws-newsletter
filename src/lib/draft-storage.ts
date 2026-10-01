@@ -8,6 +8,7 @@ import {
   DEFAULT_FRAMED_BORDER,
   DEFAULT_FRAMED_BOX_HEIGHT,
   DEFAULT_FRAMED_BOX_WIDTH,
+  defaultFrameBorder,
   defaultSpacing,
   emptyFooter,
 } from "@/lib/types";
@@ -124,11 +125,33 @@ function migrateDraft(draft: NewsletterDraft): NewsletterDraft {
     ...draft,
     dividerSrc: draft.dividerSrc || "/assets/divider-dots.png",
     spacing: { ...defaultSpacing, ...draft.spacing },
+    frameBorder: { ...defaultFrameBorder, ...draft.frameBorder },
   };
 
   const sections: Section[] = next.sections.map((section) => {
     let blocks = section.blocks.map((block) => {
       if (block.type === "framedTitle") return migrateFramedTitle(block);
+      if (block.type === "footerBar") {
+        const drop = new Set(["facebook", "website"]);
+        let links = block.links.filter(
+          (l) => !drop.has(l.label.trim().toLowerCase()),
+        );
+        links = links.map((l) =>
+          l.label.trim().toLowerCase() === "instagram" && !l.href.trim()
+            ? {
+                ...l,
+                href: "https://www.instagram.com/goe.nieuws/",
+              }
+            : l,
+        );
+        const hasUnsub = links.some(
+          (l) => l.label.trim().toLowerCase() === "unsubscribe",
+        );
+        if (!hasUnsub) {
+          links = [...links, { label: "Unsubscribe", href: "" }];
+        }
+        return { ...block, links };
+      }
       // Old Figma insets → inherit global padX like text
       if (
         block.type === "divider" &&
