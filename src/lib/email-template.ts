@@ -585,6 +585,8 @@ export function buildNewsletterHtml(
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="color-scheme" content="light only" />
+  <meta name="supported-color-schemes" content="light only" />
   <title>${escapeHtml(titlePlain)}</title>
   <!--[if mso]>
   <noscript>
@@ -595,10 +597,13 @@ export function buildNewsletterHtml(
     </xml>
   </noscript>
   <![endif]-->
+  <style type="text/css">
+    :root { color-scheme: light only; supported-color-schemes: light only; }
+  </style>
   ${mobileStyleBlock(draft)}
   ${interactive ? interactiveChrome() : ""}
 </head>
-<body style="margin:0;padding:0;background:${escapeHtml(c.sideColor)};-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<body style="margin:0;padding:0;background:${escapeHtml(c.sideColor)};-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;color-scheme:light only;">
   <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${escapeHtml(draft.subject)}</div>
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:${escapeHtml(c.sideColor)};border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">
     <tr>
