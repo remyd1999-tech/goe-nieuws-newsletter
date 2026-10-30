@@ -2,15 +2,19 @@
 
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import Underline from "@tiptap/extension-underline";
 import Placeholder from "@tiptap/extension-placeholder";
 import { useEffect } from "react";
+import { ColorPicker } from "@/components/ColorPicker";
+import { toHex6 } from "@/lib/color";
 
 type ParagraphEditorProps = {
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
   compact?: boolean;
+  /** Text color for this editor; shown as a swatch + hex top-right of the toolbar. */
+  color?: string;
+  onColorChange?: (color: string) => void;
 };
 
 export function ParagraphEditor({
@@ -18,6 +22,8 @@ export function ParagraphEditor({
   onChange,
   placeholder = "Write the paragraph…",
   compact = false,
+  color,
+  onColorChange,
 }: ParagraphEditorProps) {
   const editor = useEditor({
     immediatelyRender: false,
@@ -32,7 +38,6 @@ export function ParagraphEditor({
         horizontalRule: false,
         listItem: false,
       }),
-      Underline,
       Placeholder.configure({
         placeholder,
       }),
@@ -60,9 +65,11 @@ export function ParagraphEditor({
 
   if (!editor) return null;
 
+  const textColor = toHex6(color ?? "#000000");
+
   return (
     <div className="overflow-hidden rounded-[var(--radius-sm)] bg-[var(--fill)] focus-within:bg-white focus-within:shadow-[0_0_0_3px_var(--accent-soft)]">
-      <div className="flex gap-0.5 border-b border-[var(--separator)] px-1.5 py-1">
+      <div className="flex items-center gap-0.5 border-b border-[var(--separator)] px-1.5 py-1">
         <ToolbarButton
           label="B"
           title="Bold"
@@ -84,8 +91,18 @@ export function ParagraphEditor({
           onClick={() => editor.chain().focus().toggleUnderline().run()}
           className="underline"
         />
+        {onColorChange ? (
+          <ColorPicker
+            compact
+            value={textColor}
+            onChange={onColorChange}
+            aria-label="Text color"
+          />
+        ) : null}
       </div>
-      <EditorContent editor={editor} />
+      <div style={{ color: textColor }}>
+        <EditorContent editor={editor} />
+      </div>
     </div>
   );
 }

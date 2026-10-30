@@ -3,6 +3,7 @@ import type {
   DividerBlock,
   FooterBarBlock,
   FrameBorder,
+  ImageBlock,
   NewsletterDraft,
   Section,
   SectionFont,
@@ -20,6 +21,24 @@ import {
   resolveSpacing,
 } from "./types";
 import { sanitizeRichHtml } from "./rich-text";
+import {
+  type ColorFill,
+  backgroundImageAttr,
+  cssBackgroundStyle,
+  solidFallback,
+} from "./color";
+
+/** bgcolor + optional HTML background= + style with solid/gradient/image. */
+function backgroundOpenAttrs(
+  fill: ColorFill,
+  extraStyle: string,
+  resolveUrl?: (src: string) => string,
+): string {
+  const solid = solidFallback(fill);
+  const img = backgroundImageAttr(fill, resolveUrl);
+  const bgAttr = img ? ` background="${escapeHtml(img)}"` : "";
+  return `bgcolor="${escapeHtml(solid)}"${bgAttr} style="${cssBackgroundStyle(fill, resolveUrl)}${extraStyle}"`;
+}
 
 /** Helvetica Neue → web-safe stack (Figma) */
 const FONT_SANS =
@@ -283,7 +302,7 @@ function dividerBlockHtml(
     1,
     EMAIL_MOBILE_WIDTH - sMob.left - sMob.right,
   );
-  const color = draft.colors.divider || "#000000";
+  const color = block.color || draft.colors.divider || "#000000";
   return `
     <tr${marker}>
       <td align="center"${cls(blockPadClass(block.id), padClass, gapClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;font-size:0;line-height:0;">
@@ -317,7 +336,7 @@ function taglineBlockHtml(
   const marker = blockMarker(block.id, interactive);
   return `
     <tr${marker}>
-      <td align="center"${cls("gn-tagline", blockPadClass(block.id), padClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;font-family:${FONT_SANS};font-size:${t.taglineSize}px;line-height:${t.taglineLineHeight};color:${escapeHtml(c.body)};text-align:center;">
+      <td align="center"${cls("gn-tagline", blockPadClass(block.id), padClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;font-family:${FONT_SANS};font-size:${t.taglineSize}px;line-height:${t.taglineLineHeight};color:${escapeHtml(block.color || c.body)};text-align:center;">
         ${escapeHtml(block.text)}
       </td>
     </tr>`;
@@ -326,6 +345,7 @@ function taglineBlockHtml(
 function footerBarBlockHtml(
   block: FooterBarBlock,
   draft: NewsletterDraft,
+  abs: (src: string) => string,
   interactive?: boolean,
 ): string {
   const c = draft.colors;
@@ -333,8 +353,9 @@ function footerBarBlockHtml(
   const sp = draft.spacing;
   const s = resolveSpacing(block, sp);
   const dark = block.dark !== false;
-  const bg = dark ? c.footerBg : c.backgroundCard;
-  const fg = dark ? c.footerText : c.body;
+  const bgFill: ColorFill =
+    block.backgroundColor || (dark ? c.footerBg : c.backgroundCard);
+  const fg = block.color || (dark ? c.footerText : c.body);
   const marker = blockMarker(block.id, interactive);
 
   const sep = ` <span class="gn-footer" style="color:${escapeHtml(fg)};font-family:${FONT_SERIF};font-size:${t.footerSize}px;"> / </span> `;
@@ -352,7 +373,11 @@ function footerBarBlockHtml(
 
   return `
     <tr${marker}>
-      <td align="center"${cls(blockPadClass(block.id))} bgcolor="${escapeHtml(bg)}" style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;background-color:${escapeHtml(bg)};text-align:center;">
+      <td align="center"${cls(blockPadClass(block.id), "gn-footer-bg")} ${backgroundOpenAttrs(
+        bgFill,
+        `padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;text-align:center;`,
+        abs,
+      )}>
         <p class="gn-footer" style="margin:0 0 8px 0;font-family:${FONT_SERIF};font-size:${t.footerSize}px;line-height:${t.footerLineHeight};color:${escapeHtml(fg)};text-align:center;">
           ${escapeHtml(block.note)}
         </p>
@@ -369,6 +394,19 @@ function footerBarBlockHtml(
 
 function blockMarker(blockId: string, interactive?: boolean): string {
   return interactive ? ` data-gn-block="${escapeHtml(blockId)}"` : "";
+}
+
+/** Right-aligned photo credit under an image (email-safe). */
+function imageCreditsHtml(
+  block: ImageBlock,
+  draft: NewsletterDraft,
+): string {
+  const text = block.credits?.trim();
+  if (!text) return "";
+  const color = block.creditsColor || draft.colors.meta || "#000000";
+  const size = Math.max(1, Math.round(block.creditsSize ?? 10));
+  const marginRight = Math.max(0, Math.round(block.creditsMarginRight ?? 0));
+  return `<p class="gn-credits" style="margin:6px ${marginRight}px 0 0;padding:0;font-family:${FONT_SANS};font-size:${size}px;line-height:1.3;font-weight:400;color:${escapeHtml(color)};text-align:right;">${escapeHtml(text)}</p>`;
 }
 
 function blockHtml(
@@ -393,7 +431,7 @@ function blockHtml(
   }
 
   if (block.type === "footerBar") {
-    return footerBarBlockHtml(block, draft, interactive);
+    return footerBarBlockHtml(block, draft, abs, interactive);
   }
 
   if (block.type === "image") {
@@ -407,6 +445,7 @@ function blockHtml(
     <tr${marker}>
       <td align="center"${cls(padCls, "gn-img-bleed")} style="padding:${s.top}px 0 ${s.bottom}px 0;font-size:0;line-height:0;">
         <img class="gn-img-full gn-img-${safe}" src="${escapeHtml(abs(block.src))}" alt="${escapeHtml(block.alt)}" width="${w}" style="display:block;margin:0;width:100%;max-width:${w}px;height:auto;border:0;outline:none;text-decoration:none;" />
+        ${imageCreditsHtml(block, draft)}
       </td>
     </tr>`;
     }
@@ -414,10 +453,28 @@ function blockHtml(
     const gapClass = usesImageGapDefault(block, sp) ? "gn-gap-image" : null;
     const padClass = usesPadXDefault(block, sp) ? "gn-img-cell" : null;
     const imgClass = `gn-img gn-img-${safe}`;
+    const credits = imageCreditsHtml(block, draft);
+    // Wrap image (+ optional credits) in a fixed-width table so the credit
+    // right-aligns to the image edge, not the full content column.
     return `
     <tr${marker}>
-      <td align="center"${cls(padCls, padClass, gapClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;">
-        <img class="${imgClass}" src="${escapeHtml(abs(block.src))}" alt="${escapeHtml(block.alt)}" width="${w}" style="display:block;margin:0 auto;width:100%;max-width:${w}px;height:auto;border:0;outline:none;text-decoration:none;" />
+      <td align="center"${cls(padCls, padClass, gapClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;font-size:0;line-height:0;">
+        <table role="presentation" width="${w}" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;width:100%;max-width:${w}px;margin:0 auto;">
+          <tr>
+            <td align="center" style="padding:0;font-size:0;line-height:0;">
+              <img class="${imgClass}" src="${escapeHtml(abs(block.src))}" alt="${escapeHtml(block.alt)}" width="${w}" style="display:block;margin:0;width:100%;max-width:${w}px;height:auto;border:0;outline:none;text-decoration:none;" />
+            </td>
+          </tr>
+          ${
+            credits
+              ? `<tr>
+            <td align="right" style="padding:0;">
+              ${credits}
+            </td>
+          </tr>`
+              : ""
+          }
+        </table>
       </td>
     </tr>`;
   }
@@ -429,10 +486,10 @@ function blockHtml(
       <td${cls(blockPadClass(block.id), gapClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;">
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;">
           <tr>
-            <td align="left" valign="middle" class="gn-meta" style="font-family:${FONT_SANS};font-size:${t.metaSize}px;line-height:${t.metaLineHeight};font-weight:400;text-transform:uppercase;color:${escapeHtml(c.meta)};">
+            <td align="left" valign="middle" class="gn-meta" style="font-family:${FONT_SANS};font-size:${t.metaSize}px;line-height:${t.metaLineHeight};font-weight:400;text-transform:uppercase;color:${escapeHtml(block.color || c.meta)};">
               ${escapeHtml(block.left)}
             </td>
-            <td align="right" valign="middle" class="gn-meta" style="font-family:${FONT_SANS};font-size:${t.metaSize}px;line-height:${t.metaLineHeight};font-weight:400;text-transform:uppercase;color:${escapeHtml(c.meta)};">
+            <td align="right" valign="middle" class="gn-meta" style="font-family:${FONT_SANS};font-size:${t.metaSize}px;line-height:${t.metaLineHeight};font-weight:400;text-transform:uppercase;color:${escapeHtml(block.color || c.meta)};">
               ${escapeHtml(block.right)}
             </td>
           </tr>
@@ -451,7 +508,7 @@ function blockHtml(
       <td align="center"${cls(blockPadClass(block.id), gapClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;">
         <table role="presentation" class="${framedBoxClass}" width="${boxWidth}" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;width:${boxWidth}px;max-width:${boxWidth}px;height:${boxHeight}px;margin:0 auto;">
           <tr>
-            <td align="center" valign="middle" class="gn-framed" width="${boxWidth}" height="${boxHeight}" style="border:${borderWidth}px solid ${escapeHtml(c.framedBorder)};width:${boxWidth}px;height:${boxHeight}px;max-width:${boxWidth}px;padding:0 16px;font-family:${FONT_SANS};font-size:${t.framedSize}px;line-height:${t.framedLineHeight};font-weight:400;color:${escapeHtml(c.body)};">
+            <td align="center" valign="middle" class="gn-framed" width="${boxWidth}" height="${boxHeight}" style="border:${borderWidth}px solid ${escapeHtml(block.borderColor || c.framedBorder)};width:${boxWidth}px;height:${boxHeight}px;max-width:${boxWidth}px;padding:0 16px;font-family:${FONT_SANS};font-size:${t.framedSize}px;line-height:${t.framedLineHeight};font-weight:400;color:${escapeHtml(block.color || c.body)};">
               ${safe}
             </td>
           </tr>
@@ -482,7 +539,7 @@ function blockHtml(
   const padClass = usesPadXDefault(block, sp) ? "gn-px" : null;
   return `
     <tr${marker}>
-      <td align="${align}"${cls(blockPadClass(block.id), padClass, typeClass, gapClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;font-family:${stack};font-size:${size}px;line-height:${lh};font-weight:400;color:${escapeHtml(c.body)};text-align:${align};">
+      <td align="${align}"${cls(blockPadClass(block.id), padClass, typeClass, gapClass)} style="padding:${s.top}px ${s.right}px ${s.bottom}px ${s.left}px;font-family:${stack};font-size:${size}px;line-height:${lh};font-weight:400;color:${escapeHtml(block.color || c.body)};text-align:${align};">
         ${safe}
       </td>
     </tr>`;
@@ -603,15 +660,27 @@ export function buildNewsletterHtml(
   ${mobileStyleBlock(draft)}
   ${interactive ? interactiveChrome() : ""}
 </head>
-<body style="margin:0;padding:0;background:${escapeHtml(c.sideColor)};-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;color-scheme:light only;">
+<body ${backgroundOpenAttrs(
+    c.sideColor,
+    "margin:0;padding:0;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;color-scheme:light only;",
+    abs,
+  )}>
   <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${escapeHtml(draft.subject)}</div>
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:${escapeHtml(c.sideColor)};border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">
+  <table role="presentation" class="gn-page" width="100%" cellspacing="0" cellpadding="0" border="0" ${backgroundOpenAttrs(
+    c.sideColor,
+    "border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;",
+    abs,
+  )}>
     <tr>
       <td align="center" style="padding:0;">
         <!--[if mso]>
         <table role="presentation" width="${w}" cellspacing="0" cellpadding="0" border="0"><tr><td>
         <![endif]-->
-        <table role="presentation" class="gn-shell" width="${w}" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:${w}px;background:${escapeHtml(c.backgroundCard)};border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;${frameCss}">
+        <table role="presentation" class="gn-shell" width="${w}" cellspacing="0" cellpadding="0" border="0" ${backgroundOpenAttrs(
+          c.backgroundCard,
+          `width:100%;max-width:${w}px;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;${frameCss}`,
+          abs,
+        )}>
           ${body}
         </table>
         <!--[if mso]>

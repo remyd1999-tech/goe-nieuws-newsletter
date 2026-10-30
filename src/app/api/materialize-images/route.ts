@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { NextResponse } from "next/server";
 import type { NewsletterDraft } from "@/lib/types";
+import { mapFillImageSrc } from "@/lib/color";
 
 export const runtime = "nodejs";
 
@@ -88,14 +89,36 @@ function rewriteDraft(
     return next ?? src;
   };
 
+  const replaceFill = <T extends NewsletterDraft["colors"][keyof NewsletterDraft["colors"]]>(
+    fill: T,
+  ): T => {
+    if (typeof fill !== "object" || fill === null) return fill;
+    return mapFillImageSrc(fill as never, (src) => replace(src) ?? src) as T;
+  };
+
   return {
     ...draft,
     dividerSrc: replace(draft.dividerSrc) ?? draft.dividerSrc,
+    colors: {
+      ...draft.colors,
+      sideColor: replaceFill(draft.colors.sideColor),
+      backgroundCard: replaceFill(draft.colors.backgroundCard),
+      footerBg: replaceFill(draft.colors.footerBg),
+    },
     sections: draft.sections.map((section) => ({
       ...section,
       blocks: section.blocks.map((block) => {
         if (block.type === "image") {
           return { ...block, src: replace(block.src) ?? block.src };
+        }
+        if (block.type === "footerBar" && block.backgroundColor) {
+          return {
+            ...block,
+            backgroundColor: mapFillImageSrc(
+              block.backgroundColor,
+              (src) => replace(src) ?? src,
+            ),
+          };
         }
         return block;
       }),

@@ -36,6 +36,12 @@ import {
 } from "@/lib/draft-storage";
 import { sampleDraft } from "@/lib/sample-draft";
 import { ParagraphEditor } from "@/components/ParagraphEditor";
+import { ColorPicker } from "@/components/ColorPicker";
+import {
+  type ColorFill,
+  cssBackgroundObject,
+  fillImageSrc,
+} from "@/lib/color";
 
 type PreviewMode = "desktop" | "mobile";
 
@@ -543,9 +549,20 @@ export function NewsletterBuilder() {
   function countDataUrlImages(d: NewsletterDraft): number {
     let n = 0;
     if (d.dividerSrc?.startsWith("data:")) n += 1;
+    for (const src of [
+      fillImageSrc(d.colors.sideColor),
+      fillImageSrc(d.colors.backgroundCard),
+      fillImageSrc(d.colors.footerBg),
+    ]) {
+      if (src?.startsWith("data:")) n += 1;
+    }
     for (const section of d.sections) {
       for (const block of section.blocks) {
         if (block.type === "image" && block.src.startsWith("data:")) n += 1;
+        if (block.type === "footerBar") {
+          const bg = fillImageSrc(block.backgroundColor);
+          if (bg?.startsWith("data:")) n += 1;
+        }
       }
     }
     return n;
@@ -901,6 +918,12 @@ export function NewsletterBuilder() {
                                   html: htmlValue,
                                 })
                               }
+                              color={block.color || draft.colors.body}
+                              onColorChange={(v) =>
+                                updateBlock(section.id, block.id, {
+                                  color: v,
+                                })
+                              }
                             />
                             <SpacingFields
                               {...blockPad(block)}
@@ -961,6 +984,47 @@ export function NewsletterBuilder() {
                               value={block.alt}
                               onChange={(v) =>
                                 updateBlock(section.id, block.id, { alt: v })
+                              }
+                            />
+                            <Field
+                              label="Credits"
+                              value={block.credits ?? ""}
+                              placeholder="Beeld: …"
+                              onChange={(v) =>
+                                updateBlock(section.id, block.id, {
+                                  credits: v,
+                                })
+                              }
+                            />
+                            <div className="grid grid-cols-2 gap-2.5">
+                              <ColorField
+                                label="Credits color"
+                                value={
+                                  block.creditsColor || draft.colors.meta
+                                }
+                                onChange={(v) =>
+                                  updateBlock(section.id, block.id, {
+                                    creditsColor: v,
+                                  })
+                                }
+                              />
+                              <NumberField
+                                label="Credits size"
+                                value={block.creditsSize ?? 10}
+                                onChange={(v) =>
+                                  updateBlock(section.id, block.id, {
+                                    creditsSize: v,
+                                  })
+                                }
+                              />
+                            </div>
+                            <NumberField
+                              label="Credits right margin"
+                              value={block.creditsMarginRight ?? 0}
+                              onChange={(v) =>
+                                updateBlock(section.id, block.id, {
+                                  creditsMarginRight: v,
+                                })
                               }
                             />
                             <Field
@@ -1029,6 +1093,15 @@ export function NewsletterBuilder() {
 
                         {block.type === "meta" && (
                           <div className="space-y-2.5">
+                            <ColorField
+                              label="Text"
+                              value={block.color || draft.colors.meta}
+                              onChange={(v) =>
+                                updateBlock(section.id, block.id, {
+                                  color: v,
+                                })
+                              }
+                            />
                             <Field
                               label="Left"
                               value={block.left}
@@ -1065,8 +1138,50 @@ export function NewsletterBuilder() {
                               }
                               compact
                               placeholder="Framed title…"
+                              color={block.color || draft.colors.body}
+                              onColorChange={(v) =>
+                                updateBlock(section.id, block.id, {
+                                  color: v,
+                                })
+                              }
                             />
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className="grid grid-cols-2 gap-2.5">
+                              <ColorField
+                                label="Border"
+                                value={
+                                  block.borderColor ||
+                                  draft.colors.framedBorder
+                                }
+                                onChange={(v) =>
+                                  updateBlock(section.id, block.id, {
+                                    borderColor: v,
+                                  })
+                                }
+                              />
+                              <NumberField
+                                label="Border W"
+                                value={
+                                  previewMode === "mobile"
+                                    ? (block.mobileBorderWidth ??
+                                      block.borderWidth ??
+                                      block.width ??
+                                      DEFAULT_FRAMED_BORDER)
+                                    : (block.borderWidth ??
+                                      block.width ??
+                                      DEFAULT_FRAMED_BORDER)
+                                }
+                                onChange={(v) =>
+                                  updateBlock(
+                                    section.id,
+                                    block.id,
+                                    previewMode === "mobile"
+                                      ? { mobileBorderWidth: v }
+                                      : { borderWidth: v },
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
                               <NumberField
                                 label="Box W"
                                 value={
@@ -1107,28 +1222,6 @@ export function NewsletterBuilder() {
                                   )
                                 }
                               />
-                              <NumberField
-                                label="Border"
-                                value={
-                                  previewMode === "mobile"
-                                    ? (block.mobileBorderWidth ??
-                                      block.borderWidth ??
-                                      block.width ??
-                                      DEFAULT_FRAMED_BORDER)
-                                    : (block.borderWidth ??
-                                      block.width ??
-                                      DEFAULT_FRAMED_BORDER)
-                                }
-                                onChange={(v) =>
-                                  updateBlock(
-                                    section.id,
-                                    block.id,
-                                    previewMode === "mobile"
-                                      ? { mobileBorderWidth: v }
-                                      : { borderWidth: v },
-                                  )
-                                }
-                              />
                             </div>
                             <p className="text-[11px] text-[var(--text-tertiary)]">
                               Fixed px size — does not scale with the viewport
@@ -1144,6 +1237,15 @@ export function NewsletterBuilder() {
 
                         {block.type === "divider" && (
                           <div className="space-y-2.5">
+                            <ColorField
+                              label="Dots"
+                              value={block.color || draft.colors.divider}
+                              onChange={(v) =>
+                                updateBlock(section.id, block.id, {
+                                  color: v,
+                                })
+                              }
+                            />
                             <SpacingFields
                               {...blockPad(block)}
                               onChange={(spacing) =>
@@ -1155,6 +1257,15 @@ export function NewsletterBuilder() {
 
                         {block.type === "tagline" && (
                           <div className="space-y-2.5">
+                            <ColorField
+                              label="Text"
+                              value={block.color || draft.colors.body}
+                              onChange={(v) =>
+                                updateBlock(section.id, block.id, {
+                                  color: v,
+                                })
+                              }
+                            />
                             <Field
                               label="Tagline"
                               value={block.text}
@@ -1194,6 +1305,35 @@ export function NewsletterBuilder() {
                                 <span className="absolute left-[2px] size-[18px] rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-[16px]" />
                               </span>
                             </label>
+                            <ColorField
+                              label="Background"
+                              value={
+                                block.backgroundColor ||
+                                (block.dark !== false
+                                  ? draft.colors.footerBg
+                                  : draft.colors.backgroundCard)
+                              }
+                              onChange={(v) =>
+                                updateBlock(section.id, block.id, {
+                                  backgroundColor: v,
+                                })
+                              }
+                              allowGradient
+                            />
+                            <ColorField
+                              label="Text"
+                              value={
+                                block.color ||
+                                (block.dark !== false
+                                  ? draft.colors.footerText
+                                  : draft.colors.body)
+                              }
+                              onChange={(v) =>
+                                updateBlock(section.id, block.id, {
+                                  color: v,
+                                })
+                              }
+                            />
                             <Field
                               label="Note"
                               value={block.note}
@@ -1382,26 +1522,25 @@ export function NewsletterBuilder() {
             ) : null}
           </Panel>
 
-          <Panel title="Colors">
-            <div className="grid grid-cols-2 gap-2.5">
-              {(
-                [
-                  ["sideColor", "Side"],
-                  ["backgroundCard", "Card"],
-                  ["body", "Body"],
-                  ["divider", "Dots"],
-                  ["footerBg", "Footer bg"],
-                  ["footerText", "Footer text"],
-                ] as const
-              ).map(([key, label]) => (
-                <ColorField
-                  key={key}
-                  label={label}
-                  value={draft.colors[key]}
-                  onChange={(v) => updateColor(key, v)}
-                />
-              ))}
+          <Panel title="Page colors">
+            <div className="space-y-2.5">
+              <ColorField
+                label="Side"
+                value={draft.colors.sideColor}
+                onChange={(v) => updateColor("sideColor", v)}
+                allowGradient
+              />
+              <ColorField
+                label="Card"
+                value={draft.colors.backgroundCard}
+                onChange={(v) => updateColor("backgroundCard", v)}
+                allowGradient
+              />
             </div>
+            <p className="mt-2 text-[11px] text-[var(--text-tertiary)]">
+              Text / dots live on each block. Prefer Image over Linear for wider
+              email support — always keep a solid fallback.
+            </p>
           </Panel>
 
           <Panel
@@ -1529,7 +1668,7 @@ export function NewsletterBuilder() {
           </div>
           <div
             className="apple-scroll min-h-0 flex-1 overflow-auto"
-            style={{ background: draft.colors.sideColor }}
+            style={cssBackgroundObject(draft.colors.sideColor)}
           >
             <div
               className={`mx-auto py-8 transition-[width] duration-200 ${
@@ -1554,7 +1693,7 @@ export function NewsletterBuilder() {
                 style={{
                   width: previewWidth,
                   height: 800,
-                  background: draft.colors.backgroundCard,
+                  ...cssBackgroundObject(draft.colors.backgroundCard),
                 }}
               />
             </div>
@@ -1860,42 +1999,41 @@ function NumberField({
   );
 }
 
-function ColorField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
+function ColorField(
+  props:
+    | {
+        label: string;
+        value: string;
+        onChange: (value: string) => void;
+        allowGradient?: false;
+      }
+    | {
+        label: string;
+        value: ColorFill;
+        onChange: (value: ColorFill) => void;
+        allowGradient: true;
+      },
+) {
+  const { label } = props;
   return (
-    <label className="block">
+    <div className="block">
       <span className="mb-1.5 block text-[12px] font-medium text-[var(--text-secondary)]">
         {label}
       </span>
-      <div className="flex items-center gap-2 rounded-[var(--radius-sm)] bg-[var(--fill)] p-1.5 focus-within:bg-white focus-within:shadow-[0_0_0_3px_var(--accent-soft)]">
-        <input
-          type="color"
-          value={normalizeHex(value)}
-          onChange={(e) => onChange(e.target.value)}
-          className="size-7 shrink-0 overflow-hidden rounded-md"
+      {props.allowGradient ? (
+        <ColorPicker
+          value={props.value}
+          onChange={props.onChange}
+          allowGradient
+          aria-label={label}
         />
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full bg-transparent px-1 font-mono text-[12px] outline-none"
+      ) : (
+        <ColorPicker
+          value={props.value}
+          onChange={props.onChange}
+          aria-label={label}
         />
-      </div>
-    </label>
+      )}
+    </div>
   );
-}
-
-function normalizeHex(value: string): string {
-  const v = value.trim();
-  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v;
-  if (/^#[0-9a-fA-F]{3}$/.test(v)) {
-    return `#${v[1]}${v[1]}${v[2]}${v[2]}${v[3]}${v[3]}`;
-  }
-  return "#000000";
 }

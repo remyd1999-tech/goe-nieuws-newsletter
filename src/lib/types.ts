@@ -1,3 +1,12 @@
+import type { ColorFill } from "./color";
+
+export type {
+  ColorFill,
+  GradientStop,
+  ImageFill,
+  LinearGradient,
+} from "./color";
+
 /** Padding in px (email-safe). */
 export type BlockSpacing = {
   top: number;
@@ -31,6 +40,14 @@ export type ImageBlock = SpacedBlock & {
   fullBleed?: boolean;
   /** Mobile-only full bleed; inherits `fullBleed` when omitted. */
   mobileFullBleed?: boolean;
+  /** Photo credit under the image (right-aligned). */
+  credits?: string;
+  /** #RRGGBB — falls back to `colors.meta`. */
+  creditsColor?: string;
+  /** px font size. Defaults to 10. */
+  creditsSize?: number;
+  /** Right inset of the credit from the image edge (px). Defaults to 0. */
+  creditsMarginRight?: number;
 };
 
 export type TextBlock = SpacedBlock & {
@@ -47,6 +64,8 @@ export type TextBlock = SpacedBlock & {
   fontSize?: number;
   /** unitless or px line-height override. */
   lineHeight?: number;
+  /** #RRGGBB — falls back to `colors.body`. */
+  color?: string;
 };
 
 /** SEIZOEN … | NIEUWSBRIEF … row */
@@ -55,6 +74,8 @@ export type MetaBlock = SpacedBlock & {
   type: "meta";
   left: string;
   right: string;
+  /** #RRGGBB — falls back to `colors.meta`. */
+  color?: string;
 };
 
 /**
@@ -82,12 +103,18 @@ export type FramedTitleBlock = SpacedBlock & {
   mobileBoxWidth?: number;
   mobileBoxHeight?: number;
   mobileBorderWidth?: number;
+  /** #RRGGBB — falls back to `colors.body`. */
+  color?: string;
+  /** #RRGGBB — falls back to `colors.framedBorder`. */
+  borderColor?: string;
 };
 
 /** Dotted separator (Figma Line 49 PNG). */
 export type DividerBlock = SpacedBlock & {
   id: string;
   type: "divider";
+  /** #RRGGBB — falls back to `colors.divider`. */
+  color?: string;
 };
 
 /** Centered tagline above the closing logo / footer bar. */
@@ -95,6 +122,8 @@ export type TaglineBlock = SpacedBlock & {
   id: string;
   type: "tagline";
   text: string;
+  /** #RRGGBB — falls back to `colors.body`. */
+  color?: string;
 };
 
 /** Dark (or light) closing bar with note + links. */
@@ -105,6 +134,10 @@ export type FooterBarBlock = SpacedBlock & {
   links: { label: string; href: string }[];
   /** Full-bleed black bar */
   dark?: boolean;
+  /** #RRGGBB — falls back to footerText / body. */
+  color?: string;
+  /** Solid or linear gradient — falls back to footerBg / backgroundCard. */
+  backgroundColor?: ColorFill;
 };
 
 export type BodyBlock =
@@ -128,17 +161,20 @@ export type Section = {
 };
 
 export type NewsletterColors = {
-  backgroundCard: string;
+  /** Solid or linear gradient (email card / shell). */
+  backgroundCard: ColorFill;
   /**
    * Desktop gutter left/right of the email frame (Gmail web, etc.).
    * Invisible on mobile when the email is full-bleed.
+   * Solid or linear gradient.
    */
-  sideColor: string;
+  sideColor: ColorFill;
   body: string;
   meta: string;
   framedBorder: string;
   divider: string;
-  footerBg: string;
+  /** Solid or linear gradient. */
+  footerBg: ColorFill;
   footerText: string;
 };
 
