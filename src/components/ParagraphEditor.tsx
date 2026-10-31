@@ -91,6 +91,13 @@ export function ParagraphEditor({
           onClick={() => editor.chain().focus().toggleUnderline().run()}
           className="underline"
         />
+        <ToolbarButton
+          label="S"
+          title="Strikethrough"
+          active={editor.isActive("strike")}
+          onClick={() => editor.chain().focus().toggleStrike().run()}
+          className="line-through"
+        />
         {onColorChange ? (
           <ColorPicker
             compact

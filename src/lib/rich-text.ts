@@ -1,4 +1,15 @@
-const ALLOWED_TAGS = new Set(["p", "br", "em", "i", "strong", "b", "u"]);
+const ALLOWED_TAGS = new Set([
+  "p",
+  "br",
+  "em",
+  "i",
+  "strong",
+  "b",
+  "u",
+  "s",
+  "strike",
+  "del",
+]);
 
 /**
  * Keep only email-safe inline formatting tags from the rich-text editor.
